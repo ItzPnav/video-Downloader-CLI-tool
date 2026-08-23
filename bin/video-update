@@ -1,0 +1,50 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+PROJECT="$HOME/video-extractor"
+
+echo
+echo "========================================"
+echo "       VIDEO EXTRACTOR UPDATE"
+echo "========================================"
+echo
+
+echo "[+] Updating Termux packages..."
+pkg update -y
+
+echo
+echo "[+] Updating Python dependencies..."
+
+python -m pip install --upgrade \
+    requests \
+    beautifulsoup4 \
+    yt-dlp \
+    selenium
+
+echo
+echo "[+] Checking FFmpeg..."
+
+if command -v ffmpeg >/dev/null 2>&1; then
+    echo "[✓] FFmpeg OK"
+else
+    echo "[!] FFmpeg missing"
+    echo "[+] Installing FFmpeg..."
+    pkg install ffmpeg -y
+fi
+
+echo
+echo "[+] Checking Chromium..."
+
+if command -v chromium-browser >/dev/null 2>&1; then
+    echo "[✓] Chromium OK"
+else
+    echo "[!] Chromium missing"
+    echo "[+] Installing Chromium..."
+    pkg install x11-repo -y
+    pkg install chromium -y
+fi
+
+echo
+echo "========================================"
+echo "             UPDATE COMPLETE"
+echo "========================================"
+echo

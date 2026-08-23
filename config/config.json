@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "download_directory": "/sdcard/Download",
+    "preferred_format": "bv*+ba/b",
+    "merge_format": "mp4",
+    "browser_wait_seconds": 8,
+    "use_ytdlp": true,
+    "use_static_scanner": true,
+    "use_browser": true,
+    "github": {
+        "repository": "",
+        "branch": "main"
+    }
+}

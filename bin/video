@@ -1,0 +1,18 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+PROJECT="$HOME/video-extractor"
+SRC="$PROJECT/src"
+
+if [ "$#" -eq 0 ]; then
+    echo
+    echo "Video Extractor"
+    echo
+    echo "Usage:"
+    echo '  video "URL"'
+    echo
+    exit 1
+fi
+
+export PYTHONPATH="$SRC"
+
+exec python "$SRC/main.py" "$@"
