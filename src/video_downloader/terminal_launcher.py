@@ -179,8 +179,22 @@ def kill_process_by_pid(pid: int) -> bool:
     return success
 
 
-def _stream_worker_output(proc: subprocess.Popen, tier: str, stop_event: threading.Event) -> None:
-    """Read lines from worker process stdout and print with tier prefix."""
+def _stream_worker_output(
+    proc: subprocess.Popen,
+    tier: str,
+    stop_event: threading.Event,
+    log_file: Optional[Path] = None,
+    echo_stdout: bool = False,
+) -> None:
+    """Read lines from worker process stdout, write to log_file, and optionally print to console."""
+    log_fp = None
+    if log_file:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            log_fp = open(log_file, "a", encoding="utf-8", errors="replace")
+        except Exception:
+            log_fp = None
+
     try:
         if not proc.stdout:
             return
@@ -189,10 +203,22 @@ def _stream_worker_output(proc: subprocess.Popen, tier: str, stop_event: threadi
                 break
             line = raw_line.rstrip()
             if line:
-                print(f"[{tier}] {line}")
+                if log_fp:
+                    try:
+                        log_fp.write(line + "\n")
+                        log_fp.flush()
+                    except Exception:
+                        pass
+                if echo_stdout:
+                    print(f"[{tier}] {line}")
     except Exception:
         pass
     finally:
+        if log_fp:
+            try:
+                log_fp.close()
+            except Exception:
+                pass
         try:
             if proc.stdout:
                 proc.stdout.close()
@@ -206,8 +232,10 @@ def _spawn_subprocess(
     cwd: Optional[str],
     env: dict,
     pid_file: Optional[Path],
+    log_file: Optional[Path] = None,
+    echo_stdout: bool = False,
 ) -> LaunchedProcess:
-    """Spawn worker as a background subprocess with streaming labeled terminal output."""
+    """Spawn worker as a background subprocess with file logging and optional console streaming."""
     proc = subprocess.Popen(
         command,
         cwd=cwd,
@@ -222,7 +250,7 @@ def _spawn_subprocess(
     stop_event = threading.Event()
     reader_thread = threading.Thread(
         target=_stream_worker_output,
-        args=(proc, tier, stop_event),
+        args=(proc, tier, stop_event, log_file, echo_stdout),
         daemon=True,
     )
     reader_thread.start()
@@ -243,9 +271,11 @@ def spawn_tier(
     command: list[str],
     title: str,
     pid_file: Optional[Path] = None,
-    prefer_gui: bool = True,
+    prefer_gui: bool = False,
     cwd: Optional[Path] = None,
     env: Optional[dict] = None,
+    log_file: Optional[Path] = None,
+    echo_stdout: bool = False,
 ) -> LaunchedProcess:
     """
     Spawn a worker command in a new terminal window if possible and requested,
@@ -261,7 +291,7 @@ def spawn_tier(
 
     # If GUI terminal spawning is disabled or not possible, run as background subprocess
     if not prefer_gui:
-        return _spawn_subprocess(tier, command, working_dir, process_env, pid_file)
+        return _spawn_subprocess(tier, command, working_dir, process_env, pid_file, log_file, echo_stdout)
 
     # Platform-specific terminal window spawning
     try:
@@ -370,4 +400,4 @@ def spawn_tier(
         print(f"[!] Terminal GUI spawn failed for {tier} ({launch_err}), falling back to background subprocess.")
 
     # Graceful fallback: background subprocess with streaming labeled terminal output
-    return _spawn_subprocess(tier, command, working_dir, process_env, pid_file)
+    return _spawn_subprocess(tier, command, working_dir, process_env, pid_file, log_file, echo_stdout)

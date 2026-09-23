@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from candidate import (
+from .candidate import (
     Candidate,
     detect_extension,
     score_candidate,

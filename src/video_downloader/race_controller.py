@@ -43,10 +43,10 @@ SRC_DIR = Path(__file__).resolve().parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from candidate import Candidate
-from agent_worker import dict_to_candidate, candidate_to_dict
-from terminal_launcher import spawn_tier, kill_process_by_pid, LaunchedProcess
-from utils import load_config, write_history
+from .candidate import Candidate
+from .agent_worker import dict_to_candidate, candidate_to_dict
+from .terminal_launcher import spawn_tier, kill_process_by_pid, LaunchedProcess
+from .utils import load_config, write_history
 
 try:
     from langgraph.graph import StateGraph, START, END
@@ -91,6 +91,7 @@ class ExtractionRaceController:
 
     DEFAULT_TIMEOUT = 20.0
     DEFAULT_CONFIDENCE = 50
+    DEFAULT_BROWSER_GRACE = 2.5
 
     def __init__(
         self,
@@ -103,6 +104,7 @@ class ExtractionRaceController:
         no_static: bool = False,
         no_scrapling: bool = False,
         prefer_gui: Optional[bool] = None,
+        browser_grace_seconds: Optional[float] = None,
     ):
         self.url = url
         self.requested_quality = requested_quality
@@ -117,6 +119,13 @@ class ExtractionRaceController:
             confidence_threshold
             if confidence_threshold is not None
             else self.config.get("confidence_threshold", self.DEFAULT_CONFIDENCE)
+        )
+
+        grace = self.config.get("browser_grace_seconds", self.DEFAULT_BROWSER_GRACE)
+        self.browser_grace_seconds = float(
+            browser_grace_seconds
+            if browser_grace_seconds is not None
+            else grace
         )
 
         # Determine active tiers based on config and flags
@@ -137,7 +146,20 @@ class ExtractionRaceController:
         if prefer_gui is not None:
             self.prefer_gui = prefer_gui
         else:
-            self.prefer_gui = bool(self.config.get("spawn_terminals", True))
+            self.prefer_gui = bool(self.config.get("spawn_terminals", False))
+
+        # Split into fast immediate tiers vs heavy deferred tiers (browser)
+        self.immediate_tiers: list[str] = [
+            t for t in self.active_tiers
+            if t != "browser" or self.browser_grace_seconds <= 0
+        ]
+        self.deferred_tiers: list[str] = [
+            t for t in self.active_tiers
+            if t == "browser" and self.browser_grace_seconds > 0
+        ]
+        if not self.immediate_tiers and self.deferred_tiers:
+            self.immediate_tiers = list(self.deferred_tiers)
+            self.deferred_tiers = []
 
         # Runtime tracking
         self.session_dir = Path(tempfile.mkdtemp(prefix="video_race_"))
@@ -151,10 +173,12 @@ class ExtractionRaceController:
         python_exe = sys.executable
         pid_file = self.session_dir / f"{tier}.pid"
         result_file = self.session_dir / f"{tier}_result.json"
+        log_file = self.session_dir / f"{tier}.log"
 
         worker_cmd = [
             python_exe,
-            str(SRC_DIR / "agent_worker.py"),
+            "-W", "ignore",
+            "-m", "video_downloader.agent_worker",
             "--tier", tier,
             "--url", self.url,
             "--result-file", str(result_file),
@@ -163,6 +187,13 @@ class ExtractionRaceController:
         if self.requested_quality:
             worker_cmd.extend(["--quality", str(self.requested_quality)])
 
+        # Ensure PYTHONPATH includes src directory for local dev runs
+        env = os.environ.copy()
+        current_pythonpath = env.get("PYTHONPATH", "")
+        src_parent = str(SRC_DIR.parent)
+        if src_parent not in current_pythonpath.split(os.pathsep):
+            env["PYTHONPATH"] = f"{src_parent}{os.pathsep}{current_pythonpath}" if current_pythonpath else src_parent
+
         title = f"Extractor Agent — [{tier.upper()}]"
         proc = spawn_tier(
             tier=tier,
@@ -170,7 +201,10 @@ class ExtractionRaceController:
             title=title,
             pid_file=pid_file,
             prefer_gui=self.prefer_gui,
-            cwd=SRC_DIR,
+            cwd=SRC_DIR.parent,
+            env=env,
+            log_file=log_file,
+            echo_stdout=self.prefer_gui,
         )
         self.launched_processes[tier] = proc
         self.spawned_pids[tier] = proc.pid
@@ -178,14 +212,17 @@ class ExtractionRaceController:
         return proc
 
     def _spawn_all_tiers(self) -> None:
-        """Spawn all active tier agents concurrently."""
-        for tier in self.active_tiers:
+        """Spawn all immediate tier agents concurrently."""
+        for tier in self.immediate_tiers:
             self._spawn_single_tier(tier)
+        if self.deferred_tiers:
+            print(f"[+] Deferred tier [browser] held in standby (grace: {self.browser_grace_seconds:.1f}s)...")
 
     def _run_race_reducer(self, state: RaceState) -> dict:
         """
         Reducer implementation: polls for the first candidate >= confidence threshold,
-        declares winner, and terminates all losing processes immediately by PID.
+        adaptively escalates to deferred tiers if grace timer expires,
+        renders single-terminal status display, and terminates losing processes by PID.
         """
         winner_tier: Optional[str] = None
         winning_candidate: Optional[Candidate] = None
@@ -193,14 +230,21 @@ class ExtractionRaceController:
 
         poll_interval = 0.12
         deadline = self._start_time + self.timeout
+        is_interactive = sys.stdout.isatty() and not self.prefer_gui
+
+        tier_statuses: dict[str, str] = {t: "running" for t in self.immediate_tiers}
+        for t in self.deferred_tiers:
+            tier_statuses[t] = f"standby ({self.browser_grace_seconds:.1f}s)"
 
         while time.time() < deadline:
+            elapsed = time.time() - self._start_time
+
             # Update actual worker PIDs if reported via pid files
             for tier, handle in self.launched_processes.items():
                 actual_pid = handle.get_actual_pid()
                 self.spawned_pids[tier] = actual_pid
 
-            # Check results from each tier
+            # Check results from each tier first
             for tier in list(self.launched_processes.keys()):
                 result_file = self.session_dir / f"{tier}_result.json"
                 if result_file.exists():
@@ -208,28 +252,75 @@ class ExtractionRaceController:
                         data = json.loads(result_file.read_text(encoding="utf-8"))
                         if data.get("success") and data.get("candidate"):
                             cand = dict_to_candidate(data["candidate"])
+                            tier_statuses[tier] = f"score {cand.score}"
                             if cand.score >= self.confidence_threshold:
                                 winner_tier = tier
                                 winning_candidate = cand
                                 break
+                        else:
+                            tier_statuses[tier] = "no media"
                     except Exception:
                         pass
 
             if winner_tier is not None:
                 break
 
+            # Check if we should escalate to deferred browser tier
+            if "browser" in self.deferred_tiers and "browser" not in self.launched_processes:
+                time_left = max(0.0, self.browser_grace_seconds - elapsed)
+                tier_statuses["browser"] = f"standby ({time_left:.1f}s)"
+
+                all_immediate_finished = bool(self.immediate_tiers) and all(
+                    (self.session_dir / f"{t}_result.json").exists() for t in self.immediate_tiers
+                )
+
+                if elapsed >= self.browser_grace_seconds or all_immediate_finished:
+                    if is_interactive:
+                        sys.stdout.write("\r\033[K")
+                        sys.stdout.flush()
+                    if all_immediate_finished and elapsed < self.browser_grace_seconds:
+                        print(f"[!] Fast tiers finished without qualifying media — releasing browser agent early...")
+                    else:
+                        print(f"[+] Grace timer elapsed ({self.browser_grace_seconds:.1f}s) — releasing browser agent...")
+                    self._spawn_single_tier("browser")
+                    tier_statuses["browser"] = "running"
+
             # Check if all processes completed without winner
             all_exited = True
-            for tier, handle in self.launched_processes.items():
-                result_file = self.session_dir / f"{tier}_result.json"
-                if not result_file.exists():
-                    all_exited = False
-                    break
+            all_expected = set(self.immediate_tiers)
+            if "browser" in self.launched_processes:
+                all_expected.add("browser")
+            elif "browser" in self.deferred_tiers:
+                all_exited = False
+
+            if all_exited:
+                for tier in all_expected:
+                    result_file = self.session_dir / f"{tier}_result.json"
+                    if not result_file.exists():
+                        all_exited = False
+                        break
+
             if all_exited and not winner_tier:
+                if is_interactive:
+                    sys.stdout.write("\r\033[K")
+                    sys.stdout.flush()
                 print("[!] All extraction agents completed without finding qualifying media.")
                 break
 
+            # Render inline single-terminal status ticker
+            if is_interactive:
+                status_parts = [f"{t}: {tier_statuses.get(t, 'running')}" for t in self.active_tiers]
+                line = f"\r[+] Racing ({elapsed:.1f}s / {self.timeout:.0f}s) | " + " | ".join(status_parts)
+                if len(line) > 120:
+                    line = line[:117] + "..."
+                sys.stdout.write(line + "\033[K")
+                sys.stdout.flush()
+
             time.sleep(poll_interval)
+
+        if is_interactive:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
 
         duration_ms = int((time.time() - self._start_time) * 1000)
 
@@ -292,7 +383,7 @@ class ExtractionRaceController:
                 return {"spawned_pids": {tier_name: handle.pid}}
             return tier_node
 
-        for tier in self.active_tiers:
+        for tier in self.immediate_tiers:
             builder.add_node(tier, make_tier_node(tier))
             builder.add_edge(START, tier)
             builder.add_edge(tier, "reducer")
@@ -312,11 +403,26 @@ class ExtractionRaceController:
         Orchestrates parallel tier nodes into a 'first valid candidate wins' reducer.
         Terminates losing processes immediately by PID.
         """
+        # Refresh immediate and deferred tiers in case active_tiers was modified
+        self.immediate_tiers = [
+            t for t in self.active_tiers
+            if t != "browser" or self.browser_grace_seconds <= 0
+        ]
+        self.deferred_tiers = [
+            t for t in self.active_tiers
+            if t == "browser" and self.browser_grace_seconds > 0
+        ]
+        if not self.immediate_tiers and self.deferred_tiers:
+            self.immediate_tiers = list(self.deferred_tiers)
+            self.deferred_tiers = []
         print()
         print("=" * 60)
         print("           CONCURRENT MULTI-AGENT EXTRACTION RACE")
         print(f"  URL       : {self.url}")
         print(f"  Agents ({len(self.active_tiers)}): {', '.join(self.active_tiers)}")
+        if self.deferred_tiers:
+            print(f"  Deferred  : {', '.join(self.deferred_tiers)} (grace: {self.browser_grace_seconds:.1f}s)")
+        print(f"  Mode      : {'External Windows' if self.prefer_gui else 'Single Terminal (Background)'}")
         print(f"  Timeout   : {self.timeout:.1f}s")
         print(f"  Threshold : Score >= {self.confidence_threshold}")
         print("=" * 60)

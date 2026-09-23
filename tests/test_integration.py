@@ -23,10 +23,16 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from candidate import Candidate
-from downloader import download, safe_filename
-from router import identify
-from race_controller import ExtractionRaceController
+try:
+    from video_downloader.candidate import Candidate
+    from video_downloader.downloader import download, safe_filename
+    from video_downloader.router import identify
+    from video_downloader.race_controller import ExtractionRaceController
+except ImportError:
+    from candidate import Candidate
+    from downloader import download, safe_filename
+    from router import identify
+    from race_controller import ExtractionRaceController
 
 
 class TestIntegration(unittest.TestCase):
@@ -73,7 +79,7 @@ class TestIntegration(unittest.TestCase):
         self.assertIn("-c", cmd_args)
         self.assertIn("copy", cmd_args)
 
-    @patch("site_extractor.download")
+    @patch("video_downloader.site_extractor.download")
     def test_downloader_ytdlp_execution(self, mock_ytdlp_dl):
         mock_ytdlp_dl.return_value = True
 

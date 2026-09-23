@@ -3,8 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from progress import DownloadProgress
-from utils import get_download_dir
+from .progress import DownloadProgress
+from .utils import get_download_dir
 
 
 def get_target_download_dir():

@@ -5,7 +5,7 @@ import time
 
 from urllib.parse import urljoin
 
-from candidate import (
+from .candidate import (
     Candidate,
     detect_extension,
     score_candidate,

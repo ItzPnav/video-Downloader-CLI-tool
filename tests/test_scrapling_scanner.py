@@ -12,8 +12,12 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
-from candidate import Candidate
+try:
+    from video_downloader.scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
+    from video_downloader.candidate import Candidate
+except ImportError:
+    from scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
+    from candidate import Candidate
 
 
 class TestScraplingScanner(unittest.TestCase):

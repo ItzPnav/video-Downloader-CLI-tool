@@ -14,13 +14,22 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from terminal_launcher import (
-    detect_platform,
-    find_linux_terminal,
-    kill_process_by_pid,
-    spawn_tier,
-    LaunchedProcess,
-)
+try:
+    from video_downloader.terminal_launcher import (
+        detect_platform,
+        find_linux_terminal,
+        kill_process_by_pid,
+        spawn_tier,
+        LaunchedProcess,
+    )
+except ImportError:
+    from terminal_launcher import (
+        detect_platform,
+        find_linux_terminal,
+        kill_process_by_pid,
+        spawn_tier,
+        LaunchedProcess,
+    )
 
 
 class TestTerminalLauncher(unittest.TestCase):

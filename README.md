@@ -125,6 +125,14 @@ Runs natively on Android Termux, standard Linux distributions, macOS, and Window
 
 # <img src="https://cdn.simpleicons.org/gnometerminal/241F31" width="22" height="22" align="center"/> **Setup**
 
+### Option A: Install via pip (Recommended)
+
+```bash
+pip install video-downloader
+```
+
+### Option B: Install from Source
+
 1. **Clone the repository into your home directory:**
 
 ```bash
@@ -135,6 +143,12 @@ git clone https://github.com/ItzPnav/video-Downloader-CLI-tool.git ~/video-extra
 
 ```bash
 pip install -r ~/video-extractor/requirements.txt
+```
+
+Alternatively, install in editable mode:
+
+```bash
+pip install -e ~/video-extractor
 ```
 
 3. **Install Scrapling browser binaries for stealth fetcher:**
@@ -191,9 +205,10 @@ video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 # <img src="https://cdn.simpleicons.org/shieldsdotio/00B4D8" width="22" height="22" align="center"/> **Production Tips**
 
 * Always keep `yt-dlp` updated — run `pip install -U yt-dlp` regularly as websites frequently alter extraction signatures.
+* Single-terminal background execution is enabled by default. Pass `--spawn-terminals` if you want independent OS terminal windows spawned per tier for debugging.
+* Fast tiers (`yt-dlp`, static scanner, Scrapling) launch immediately at $T=0\text{s}$. The heavy headless browser tier is held in standby behind an adaptive grace timer (default: 2.5s, configurable via `"browser_grace_seconds"` or `--browser-grace`) to save CPU and RAM on quick downloads.
 * Set `"use_browser": false` in `config/config.json` or pass `--no-browser` on low-memory devices where Chromium is unavailable.
 * Run `scrapling install` once during initial setup so Scrapling's stealth browser dependencies are cached locally.
-* Use `--no-terminals` in headless SSH environments or script automation to suppress GUI terminal window creation.
 * Adjust `"race_timeout": 20` in `config/config.json` depending on network latency conditions.
 * The default download directory is `/sdcard/Download` on Termux. Update `"download_directory"` in `config/config.json` for Linux/macOS/Windows desktop setups.
 
@@ -236,27 +251,32 @@ video-extractor/
 +-- bin/
 |   +-- video                  # Shell launcher -- sets PYTHONPATH and exec python
 |   +-- video-update           # Automated system updater script
+|   +-- video.bat              # Windows batch launcher
 |
 +-- config/
 |   +-- config.json            # Preferences, race timeout, and engine toggles
 |   +-- history.json           # Persistent download history with race_duration_ms
 |
 +-- src/
-|   +-- main.py                # CLI entry point, argument parser, race dispatcher
-|   +-- race_controller.py     # LangGraph concurrent multi-agent race coordinator
-|   +-- terminal_launcher.py   # OS-agnostic terminal and process spawner
-|   +-- agent_worker.py        # Independent tier worker process executor
-|   +-- scrapling_scanner.py   # Scrapling adaptive fetcher and DOM scanner tier
-|   +-- site_extractor.py      # yt-dlp extraction wrapper and format selector
-|   +-- static_scanner.py      # HTML/JSON-LD/JS regex scanner (BeautifulSoup)
-|   +-- browser_scanner.py     # Selenium + Chromium network performance sniffer
-|   +-- candidate.py           # Media candidate model and scoring logic
-|   +-- selector.py            # Candidate ranking algorithm
-|   +-- downloader.py          # FFmpeg stream copy and download executor
-|   +-- progress.py            # Terminal spinner and progress bar renderer
-|   +-- utils.py               # Config loader, filename sanitizer, history writer
-|   +-- router.py              # Platform identifier and route registry
-|   +-- routes/                # Domain-specific matchers (youtube, vimeo, etc.)
+|   +-- main.py                # Standalone CLI entry bridge
+|   +-- video_downloader/      # Core Python package
+|       +-- __init__.py        # Public package exports
+|       +-- cli.py             # CLI entry point and argument parser
+|       +-- race_controller.py # LangGraph concurrent multi-agent race coordinator
+|       +-- terminal_launcher.py # OS-agnostic terminal and process spawner
+|       +-- agent_worker.py    # Independent tier worker process executor
+|       +-- scrapling_scanner.py # Scrapling adaptive fetcher and DOM scanner tier
+|       +-- site_extractor.py  # yt-dlp extraction wrapper and format selector
+|       +-- static_scanner.py  # HTML/JSON-LD/JS regex scanner (BeautifulSoup)
+|       +-- browser_scanner.py # Selenium + Chromium network performance sniffer
+|       +-- candidate.py       # Media candidate model and scoring logic
+|       +-- selector.py        # Candidate ranking algorithm
+|       +-- downloader.py      # FFmpeg stream copy and download executor
+|       +-- progress.py        # Terminal spinner and progress bar renderer
+|       +-- utils.py           # Config loader, filename sanitizer, history writer
+|       +-- router.py          # Platform identifier and route registry
+|       +-- routes/            # Domain-specific matchers (youtube, vimeo, etc.)
+|       +-- extractors/        # Native extractor wrappers
 |
 +-- tests/                     # Unit and integration test suite
 |   +-- test_scrapling_scanner.py
@@ -264,6 +284,8 @@ video-extractor/
 |   +-- test_race_controller.py
 |   +-- test_integration.py
 |
++-- pyproject.toml             # Modern PEP 621 Python package configuration
++-- LICENSE                    # MIT License
 +-- requirements.txt           # Python dependencies
 +-- README.md                  # Project documentation
 +-- PROJECT.md                 # Architecture and project overview
@@ -272,6 +294,7 @@ video-extractor/
 +-- ARCHITECTURE.md            # Paradigm shift and LangGraph design
 +-- IMPLEMENTATION.md          # Technical implementation guide
 +-- GEMINI.md                  # Project memory and rules
++-- dist/                      # Built wheels (.whl) and source distributions (.tar.gz)
 ```
 
 ---

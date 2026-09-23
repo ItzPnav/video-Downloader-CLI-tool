@@ -28,13 +28,20 @@ SRC_DIR = Path(__file__).resolve().parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from candidate import Candidate
-from selector import choose
+try:
+    from .candidate import Candidate
+    from .selector import choose
+except (ImportError, ValueError):
+    from video_downloader.candidate import Candidate
+    from video_downloader.selector import choose
 
 
 def run_ytdlp_agent(url: str, requested_quality: Optional[str] = None) -> Optional[Candidate]:
     """Run yt-dlp native extraction tier."""
-    from site_extractor import available, extract_info, choose_format
+    try:
+        from .site_extractor import available, extract_info, choose_format
+    except (ImportError, ValueError):
+        from video_downloader.site_extractor import available, extract_info, choose_format
 
     if not available():
         print("[-] [yt-dlp] yt-dlp binary is not available.")
@@ -68,7 +75,10 @@ def run_ytdlp_agent(url: str, requested_quality: Optional[str] = None) -> Option
 
 def run_static_agent(url: str) -> Optional[Candidate]:
     """Run static HTML scanner (BeautifulSoup) tier."""
-    from static_scanner import StaticScanner
+    try:
+        from .static_scanner import StaticScanner
+    except (ImportError, ValueError):
+        from video_downloader.static_scanner import StaticScanner
 
     print(f"[+] [static] Scanning HTML DOM: {url}")
     scanner = StaticScanner(url)
@@ -83,7 +93,10 @@ def run_static_agent(url: str) -> Optional[Candidate]:
 
 def run_browser_agent(url: str) -> Optional[Candidate]:
     """Run headless Chromium / Selenium network sniffer tier."""
-    from browser_scanner import BrowserScanner
+    try:
+        from .browser_scanner import BrowserScanner
+    except (ImportError, ValueError):
+        from video_downloader.browser_scanner import BrowserScanner
 
     print(f"[+] [browser] Sniffing network streams: {url}")
     scanner = BrowserScanner(url)
@@ -98,7 +111,10 @@ def run_browser_agent(url: str) -> Optional[Candidate]:
 
 def run_scrapling_agent(url: str) -> Optional[Candidate]:
     """Run Scrapling adaptive fetcher and DOM scanner tier."""
-    from scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
+    try:
+        from .scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
+    except (ImportError, ValueError):
+        from video_downloader.scrapling_scanner import ScraplingScanner, SCRAPLING_AVAILABLE
 
     if not SCRAPLING_AVAILABLE:
         print("[!] [scrapling] Scrapling library not installed.")

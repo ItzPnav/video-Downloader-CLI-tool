@@ -9,10 +9,16 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from router import (
-    identify,
-    available_routes,
-)
+try:
+    from video_downloader.router import (
+        identify,
+        available_routes,
+    )
+except ImportError:
+    from router import (
+        identify,
+        available_routes,
+    )
 
 
 tests = [

@@ -3,7 +3,7 @@ import shutil
 import subprocess
 
 
-from utils import get_download_dir
+from .utils import get_download_dir
 
 
 def command_exists(command):
@@ -44,7 +44,10 @@ def download(candidate, filename="video", requested_quality=None):
     # If the candidate was extracted by yt-dlp, use yt-dlp download engine with ffmpeg muxing
     if candidate.source == "ytdlp" or candidate.metadata.get("engine") == "ytdlp":
         orig_url = candidate.metadata.get("original_url") or candidate.url
-        from site_extractor import download as ytdlp_download
+        try:
+            from .site_extractor import download as ytdlp_download
+        except (ImportError, ValueError):
+            from video_downloader.site_extractor import download as ytdlp_download
         success = ytdlp_download(orig_url, requested_quality)
         if success:
             download_dir = get_download_dir()

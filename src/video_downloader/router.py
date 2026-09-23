@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from routes import RouteRegistry
+from .routes import RouteRegistry
 
-from routes import (
+from .routes import (
     youtube,
     tnaflix,
     vimeo,

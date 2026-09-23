@@ -16,26 +16,32 @@
 ## 2. FILE OWNERSHIP — WHO TOUCHES WHAT
 
 ```
-bin/video                  ← Executable shell launcher script for CLI
-bin/video-update           ← Automated system and dependency updater script
-config/config.json         ← Application configuration and user preferences
-config/history.json        ← Persistent download history log
-src/main.py                ← CLI entry point, argument parser, and flow controller
-src/terminal_launcher.py   ← OS-agnostic terminal and process spawner
-src/race_controller.py     ← LangGraph concurrent multi-agent race coordinator
-src/agent_worker.py        ← Independent worker process executor per tier
-src/scrapling_scanner.py   ← Scrapling adaptive fetcher and DOM scanner tier
-src/router.py              ← Platform identification and router registry
-src/routes/                ← Domain matchers (youtube, vimeo, dailymotion, tnaflix, generic)
-src/site_extractor.py      ← Native yt-dlp extraction wrapper and format selector
-src/static_scanner.py      ← HTML DOM, JSON-LD, and JS regex scanner using BeautifulSoup
-src/browser_scanner.py     ← Selenium + Headless Chromium network performance sniffer
-src/candidate.py           ← Media candidate model and scoring logic
-src/selector.py            ← Candidate ranking algorithm
-src/downloader.py          ← FFmpeg stream copying and download executor
-src/progress.py            ← Terminal spinner and progress bar renderer
-src/utils.py               ← Configuration loading, filename sanitization, history logger
-README.md                  ← Always regenerate using README BUILDER rules in Section 7.
+bin/video                                ← Executable shell launcher script for CLI
+bin/video-update                         ← Automated system and dependency updater script
+bin/video.bat                            ← Windows batch script launcher
+pyproject.toml                           ← PEP 621 Python package configuration and build metadata
+LICENSE                                  ← MIT License
+config/config.json                       ← Application configuration and user preferences
+config/history.json                      ← Persistent download history log
+src/main.py                              ← Standalone CLI entry bridge
+src/video_downloader/__init__.py         ← Public package exports
+src/video_downloader/cli.py              ← CLI entry point, argument parser, and flow controller
+src/video_downloader/terminal_launcher.py← OS-agnostic terminal and process spawner
+src/video_downloader/race_controller.py  ← LangGraph concurrent multi-agent race coordinator
+src/video_downloader/agent_worker.py     ← Independent worker process executor per tier
+src/video_downloader/scrapling_scanner.py← Scrapling adaptive fetcher and DOM scanner tier
+src/video_downloader/router.py           ← Platform identification and router registry
+src/video_downloader/routes/             ← Domain matchers (youtube, vimeo, dailymotion, tnaflix, generic)
+src/video_downloader/extractors/         ← Native extractor wrappers
+src/video_downloader/site_extractor.py   ← Native yt-dlp extraction wrapper and format selector
+src/video_downloader/static_scanner.py   ← HTML DOM, JSON-LD, and JS regex scanner using BeautifulSoup
+src/video_downloader/browser_scanner.py  ← Selenium + Headless Chromium network performance sniffer
+src/video_downloader/candidate.py        ← Media candidate model and scoring logic
+src/video_downloader/selector.py         ← Candidate ranking algorithm
+src/video_downloader/downloader.py       ← FFmpeg stream copying and download executor
+src/video_downloader/progress.py         ← Terminal spinner and progress bar renderer
+src/video_downloader/utils.py            ← Configuration loading, filename sanitization, history logger
+README.md                                ← Always regenerate using README BUILDER rules in Section 7.
 ```
 
 **Never create:** arbitrary root script files or temporary output directories outside `/sdcard/Download` or `config/` unless explicitly instructed.
@@ -59,7 +65,8 @@ Configuration lives in `config/config.json`:
   "use_scrapling": true,
   "race_timeout": 20,
   "confidence_threshold": 50,
-  "spawn_terminals": true
+  "spawn_terminals": false,
+  "browser_grace_seconds": 2.5
 }
 ```
 

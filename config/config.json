@@ -10,7 +10,8 @@
     "use_scrapling": true,
     "race_timeout": 20,
     "confidence_threshold": 50,
-    "spawn_terminals": true,
+    "spawn_terminals": false,
+    "browser_grace_seconds": 2.5,
     "github": {
         "repository": "",
         "branch": "main"

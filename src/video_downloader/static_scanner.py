@@ -5,7 +5,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from candidate import (
+from .candidate import (
     Candidate,
     detect_extension,
     score_candidate,
