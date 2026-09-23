@@ -4,11 +4,11 @@ import subprocess
 from pathlib import Path
 
 from progress import DownloadProgress
+from utils import get_download_dir
 
 
-DOWNLOAD_DIR = Path(
-    "/sdcard/Download"
-)
+def get_target_download_dir():
+    return get_download_dir()
 
 
 def available():
@@ -146,7 +146,8 @@ def download(
 
         return False
 
-    DOWNLOAD_DIR.mkdir(
+    download_dir = get_target_download_dir()
+    download_dir.mkdir(
         parents=True,
         exist_ok=True
     )
@@ -238,7 +239,7 @@ def download(
         )
 
     output_template = str(
-        DOWNLOAD_DIR
+        download_dir
         / "%(title)s.%(ext)s"
     )
 

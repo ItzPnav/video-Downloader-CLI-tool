@@ -6,7 +6,7 @@ from pathlib import Path
 # ---------------------------------------------------------
 
 SKILLS_DIR = Path(
-    r"C:\pnav\projects\PROMPT THAT WEBSITE\checklist Website\.agents\skills"
+    r"C:\pnav\projects\.agents\skills"
 )
 
 WORKFLOWS_DIR = SKILLS_DIR.parent / "workflows"

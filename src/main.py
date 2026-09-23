@@ -1,6 +1,21 @@
 import sys
+import warnings
+# Suppress non-fatal upstream compatibility warnings on Python 3.14+
+warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 from pathlib import Path
 from urllib.parse import urlparse
+
+# Force UTF-8 stream encoding on Windows to support status symbols (✓, ✗, ➡)
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from utils import (
     load_config,
@@ -9,6 +24,8 @@ from utils import (
     print_step,
     write_history,
     safe_filename,
+    get_download_dir,
+    ROOT,
 )
 
 from urllib.parse import urlparse
@@ -24,6 +41,7 @@ from router import identify, describe
 from progress import Spinner
 from browser_scanner import BrowserScanner
 from downloader import download
+from race_controller import ExtractionRaceController
 
 
 def valid_url(url):
@@ -78,9 +96,7 @@ def clean_downloads():
 
     from pathlib import Path
 
-    download_dir = Path(
-        "/sdcard/Download"
-    )
+    download_dir = get_download_dir()
 
     video_extensions = {
         ".mp4",
@@ -200,9 +216,63 @@ def clean_downloads():
 
 
 
+def system_open(filepath):
+
+    import os
+    import shutil
+    import sys
+    import subprocess
+    from pathlib import Path
+
+    path = Path(filepath)
+
+    if not path.exists():
+        print(f"[!] File not found: {path}")
+        return False
+
+    try:
+
+        if shutil.which("termux-open"):
+            subprocess.run(
+                ["termux-open", str(path)],
+                check=False
+            )
+            return True
+
+        elif sys.platform == "win32":
+            os.startfile(str(path))
+            return True
+
+        elif sys.platform == "darwin":
+            subprocess.run(
+                ["open", str(path)],
+                check=False
+            )
+            return True
+
+        elif shutil.which("xdg-open"):
+            subprocess.run(
+                ["xdg-open", str(path)],
+                check=False
+            )
+            return True
+
+        else:
+            print(
+                f"[!] No video opener found for: {path.name}"
+            )
+            return False
+
+    except Exception as error:
+
+        print(
+            f"[!] Could not open video ({error})"
+        )
+        return False
+
+
 def open_downloaded_video(output=None):
 
-    import subprocess
     from pathlib import Path
 
     if output:
@@ -211,15 +281,9 @@ def open_downloaded_video(output=None):
         if path.exists():
             print()
             print("[+] Opening video...")
-            subprocess.run(
-                ["termux-open", str(path)],
-                check=False
-            )
-            return True
+            return system_open(path)
 
-    download_dir = Path(
-        "/sdcard/Download"
-    )
+    download_dir = get_download_dir()
 
     if not download_dir.exists():
         return False
@@ -253,23 +317,15 @@ def open_downloaded_video(output=None):
     print()
     print(f"[+] Opening: {latest.name}")
 
-    subprocess.run(
-        ["termux-open", str(latest)],
-        check=False
-    )
-
-    return True
+    return system_open(latest)
 
 
 
 def open_video_picker():
 
-    import subprocess
     from pathlib import Path
 
-    download_dir = Path(
-        "/sdcard/Download"
-    )
+    download_dir = get_download_dir()
 
     extensions = {
         ".mp4", ".mkv", ".webm",
@@ -344,13 +400,7 @@ def open_video_picker():
         print()
         print(f"[+] Opening: {selected.name}")
 
-        subprocess.run(
-            [
-                "termux-open",
-                str(selected)
-            ],
-            check=False
-        )
+        system_open(selected)
 
         return 0
 
@@ -364,11 +414,11 @@ def show_help():
     print(f"Version: {get_version()}")
     print()
     print("Usage:")
-    print('  video "URL"')
+    print('  video "URL" [options]')
     print()
     print("Commands:")
     print("  video                    Show this help")
-    print('  video "URL"              Extract and download')
+    print('  video "URL"              Extract and download media')
     print("  video --help             Show help")
     print("  video --version          Show version")
     print("  video --history          Show download history")
@@ -377,18 +427,30 @@ def show_help():
     print("  video --open             Choose and play a video")
     print()
     print("Options:")
+    print("  --quality 1080p          Request video quality (e.g. 720p, 1080p)")
+    print("  --race-timeout 20        Multi-agent tier race timeout in seconds (default: 20)")
+    print("  --confidence 50          Minimum candidate score threshold to win (default: 50)")
     print("  --no-open                Don't open video after download")
-    print("  --no-browser             Skip Chromium fallback")
-    print("  --quality 1080p          Request video quality")
+    print("  --no-terminals           Run race with background subprocesses (no GUI windows)")
+    print("  --no-ytdlp               Exclude yt-dlp agent from race")
+    print("  --no-static              Exclude static scanner agent from race")
+    print("  --no-browser             Exclude headless Chromium agent from race")
+    print("  --no-scrapling           Exclude Scrapling agent from race")
     print()
     print("Output:")
-    print("  /sdcard/Download/")
+    print("  /sdcard/Download/ (or configured directory)")
     print()
     print("=" * 60)
     print()
 
 
 def show_version():
+    print(f"Video Extractor v{get_version()}")
+
+
+def show_history():
+    import json
+    history_file = ROOT / "config" / "history.json"
 
     if not history_file.exists():
         print()
@@ -423,14 +485,17 @@ def show_version():
     ):
         print()
         print(f"[{index}]")
-        print(f"URL    : {item.get('url', 'unknown')}")
-        print(f"Engine : {item.get('engine', 'unknown')}")
-
+        print(f"URL       : {item.get('url', 'unknown')}")
+        print(f"Platform  : {item.get('platform', 'unknown')}")
+        print(f"Engine    : {item.get('engine', 'unknown')}")
+        if item.get("race_duration_ms") is not None:
+            print(f"Race Time : {item['race_duration_ms']} ms")
+        if item.get("quality"):
+            print(f"Quality   : {item['quality']}")
         if item.get("title"):
-            print(f"Title  : {item['title']}")
-
+            print(f"Title     : {item['title']}")
         if item.get("output"):
-            print(f"File   : {item['output']}")
+            print(f"File      : {item['output']}")
 
     print()
     print("=" * 60)
@@ -556,6 +621,12 @@ def main():
 
     no_open = False
     no_browser = False
+    no_ytdlp = False
+    no_static = False
+    no_scrapling = False
+    prefer_gui = None
+    race_timeout = None
+    confidence_threshold = None
     requested_quality = None
     url = None
 
@@ -566,63 +637,82 @@ def main():
         arg = args[index]
 
         if arg == "--no-open":
-
             no_open = True
 
         elif arg == "--no-browser":
-
             no_browser = True
 
-        elif arg == "--quality":
+        elif arg == "--no-ytdlp":
+            no_ytdlp = True
 
+        elif arg == "--no-static":
+            no_static = True
+
+        elif arg == "--no-scrapling":
+            no_scrapling = True
+
+        elif arg in ("--no-terminals", "--headless-race"):
+            prefer_gui = False
+
+        elif arg == "--spawn-terminals":
+            prefer_gui = True
+
+        elif arg == "--race-timeout":
             if index + 1 >= len(args):
-
-                print(
-                    "[-] --quality requires "
-                    "a value such as 1080p."
-                )
-
+                print("[-] --race-timeout requires a number of seconds.")
                 return 1
-
-            requested_quality = (
-                args[index + 1]
-            )
-
+            try:
+                race_timeout = float(args[index + 1])
+            except ValueError:
+                print("[-] --race-timeout must be a valid number.")
+                return 1
             index += 1
 
-        elif arg.startswith(
-            "--quality="
-        ):
+        elif arg.startswith("--race-timeout="):
+            try:
+                race_timeout = float(arg.split("=", 1)[1])
+            except ValueError:
+                print("[-] --race-timeout must be a valid number.")
+                return 1
 
-            requested_quality = (
-                arg.split(
-                    "=",
-                    1
-                )[1]
-            )
+        elif arg == "--confidence":
+            if index + 1 >= len(args):
+                print("[-] --confidence requires an integer score.")
+                return 1
+            try:
+                confidence_threshold = int(args[index + 1])
+            except ValueError:
+                print("[-] --confidence must be an integer.")
+                return 1
+            index += 1
+
+        elif arg.startswith("--confidence="):
+            try:
+                confidence_threshold = int(arg.split("=", 1)[1])
+            except ValueError:
+                print("[-] --confidence must be an integer.")
+                return 1
+
+        elif arg == "--quality":
+            if index + 1 >= len(args):
+                print("[-] --quality requires a value such as 1080p.")
+                return 1
+            requested_quality = args[index + 1]
+            index += 1
+
+        elif arg.startswith("--quality="):
+            requested_quality = arg.split("=", 1)[1]
 
         elif arg.startswith("-"):
-
-            print(
-                f"[-] Unknown option: {arg}"
-            )
-
-            print(
-                "    Use 'video --help'."
-            )
-
+            print(f"[-] Unknown option: {arg}")
+            print("    Use 'video --help'.")
             return 1
 
         elif url is None:
-
             url = arg
 
         else:
-
-            print(
-                "[-] Multiple URLs supplied."
-            )
-
+            print("[-] Multiple URLs supplied.")
             return 1
 
         index += 1
@@ -677,403 +767,59 @@ def main():
     print()
 
     # ========================================================
-    # YOUTUBE
+    # CONCURRENT MULTI-AGENT EXTRACTION RACE
     # ========================================================
 
-    if route.platform == "youtube":
+    controller = ExtractionRaceController(
+        url=url,
+        requested_quality=requested_quality,
+        timeout=race_timeout,
+        confidence_threshold=confidence_threshold,
+        no_browser=no_browser,
+        no_ytdlp=no_ytdlp,
+        no_static=no_static,
+        no_scrapling=no_scrapling,
+        prefer_gui=prefer_gui,
+    )
 
-        print(
-            "  ✓ YouTube extractor selected"
-        )
+    race_result = controller.run_race()
 
-        if requested_quality:
+    if race_result.candidate:
+        winning_candidate = race_result.candidate
+        print()
+        print(f"[+] Downloading media from winner [{race_result.winner_engine}]...")
 
-            print(
-                f"  ✓ Requested quality: "
-                f"{requested_quality}"
+        try:
+            output = download(
+                winning_candidate,
+                filename=winning_candidate.metadata.get("title", "video"),
+                requested_quality=requested_quality,
             )
-
-        from extractors.youtube import (
-            download_video
-        )
-
-        success = download_video(
-            route,
-            requested_quality
-        )
-
-        if success:
 
             write_history({
                 "url": url,
-                "platform": "youtube",
-                "type": route.media_type,
+                "platform": route.platform,
+                "engine": race_result.winner_engine,
                 "quality": requested_quality,
+                "output": str(output) if output else None,
+                "race_duration_ms": race_result.duration_ms,
             })
 
             if not no_open:
-
-                open_downloaded_video()
+                open_downloaded_video(output)
 
             return 0
 
-        print(
-            "  ! YouTube extractor failed."
-        )
-
-    # ========================================================
-    # KNOWN SITES
-    # ========================================================
-
-    elif route.platform in (
-        "tnaflix",
-        "vimeo",
-        "dailymotion"
-    ):
-
-        print(
-            f"  ✓ {route.platform.title()} "
-            "route selected"
-        )
-
-        if requested_quality:
-
-            print(
-                f"  ✓ Requested quality: "
-                f"{requested_quality}"
-            )
-
-        # ----------------------------------------------------
-        # First attempt: site-specific yt-dlp support
-        # ----------------------------------------------------
-
-        spinner = Spinner(
-            "Checking site extractor"
-        )
-
-        spinner.start()
-
-        try:
-
-            info = extract_info(
-                url
-            )
-
-            if info:
-
-                spinner.stop(
-                    True,
-                    "Media detected"
-                )
-
-            else:
-
-                spinner.stop(
-                    False,
-                    "Site extractor found nothing"
-                )
-
-        except Exception as error:
-
-            spinner.stop(
-                False,
-                "Site extractor failed"
-            )
-
-            info = None
-
-            success = ytdlp_download(
-                url,
-                requested_quality
-            )
-
-            if success:
-
-                write_history({
-                    "url": url,
-                    "platform": route.platform,
-                    "engine": "site",
-                    "quality": requested_quality,
-                })
-
-                if not no_open:
-
-                    open_downloaded_video()
-
-                return 0
-
-        # ----------------------------------------------------
-        # Browser fallback
-        # ----------------------------------------------------
-
-        if (
-            config.get(
-                "use_browser",
-                True
-            )
-            and not no_browser
-        ):
-
-            spinner = Spinner(
-                "Starting browser scanner"
-            )
-
-            spinner.start()
-
-            try:
-
-                browser_candidates = (
-                    BrowserScanner(
-                        url
-                    ).scan()
-                )
-
-                spinner.stop(
-                    True,
-                    "Browser scanner finished"
-                )
-
-                best = choose(
-                    browser_candidates
-                )
-
-                if best:
-
-                    print(
-                        "  ✓ Browser found media."
-                    )
-
-                    output = download(
-                        best,
-                        "video"
-                    )
-
-                    write_history({
-                        "url": url,
-                        "platform": route.platform,
-                        "engine": "browser",
-                        "output": str(output),
-                    })
-
-                    if not no_open:
-
-                        open_downloaded_video(
-                            output
-                        )
-
-                    return 0
-
-            except Exception as error:
-
-                print(
-                    f"  ! Browser scanner failed: "
-                    f"{error}"
-                )
-
-    # ========================================================
-    # GENERIC
-    # ========================================================
-
-    else:
-
-        print(
-            "  ✓ Generic URL detected"
-        )
-
-        spinner = Spinner(
-            "Analyzing generic video"
-        )
-
-        spinner.start()
-
-        try:
-
-            info = extract_info(
-                url
-            )
-
-            spinner.stop(
-                True,
-                "Analysis complete"
-            )
-
-        except Exception:
-
-            spinner.stop(
-                False,
-                "Analysis failed"
-            )
-
-            info = None
-
-        if info:
-
-            print(
-                "  ✓ Generic extractor "
-                "recognized the page."
-            )
-
-            success = ytdlp_download(
-                url,
-                requested_quality
-            )
-
-            if success:
-
-                write_history({
-                    "url": url,
-                    "platform": "generic",
-                    "engine": "yt-dlp",
-                    "quality": requested_quality,
-                })
-
-                if not no_open:
-
-                    open_downloaded_video()
-
-                return 0
-
-        # ----------------------------------------------------
-        # Static scanner
-        # ----------------------------------------------------
-
-        if config.get(
-            "use_static_scanner",
-            True
-        ):
-
-            spinner = Spinner(
-                "Scanning page"
-            )
-
-            spinner.start()
-
-            candidates = []
-
-            try:
-
-                candidates = (
-                    StaticScanner(
-                        url
-                    ).scan()
-                )
-
-                spinner.stop(
-                    True,
-                    "Page scan finished"
-                )
-
-            except Exception as error:
-
-                print(
-                    f"  ! Static scanner unavailable: "
-                    f"{error}"
-                )
-
-            best = choose(
-                candidates
-            )
-
-            if best:
-
-                try:
-
-                    output = download(
-                        best,
-                        "video"
-                    )
-
-                    write_history({
-                        "url": url,
-                        "platform": "generic",
-                        "engine": "static",
-                        "output": str(output),
-                    })
-
-                    if not no_open:
-
-                        open_downloaded_video(
-                            output
-                        )
-
-                    return 0
-
-                except Exception as error:
-
-                    print(
-                        f"  ! Static download failed: "
-                        f"{error}"
-                    )
-
-        # ----------------------------------------------------
-        # Browser
-        # ----------------------------------------------------
-
-        if (
-            config.get(
-                "use_browser",
-                True
-            )
-            and not no_browser
-        ):
-
-            print(
-                "  → Running browser network scanner..."
-            )
-
-            try:
-
-                browser_candidates = (
-                    BrowserScanner(
-                        url
-                    ).scan()
-                )
-
-                best = choose(
-                    browser_candidates
-                )
-
-                if best:
-
-                    print(
-                        "  ✓ Browser found media."
-                    )
-
-                    output = download(
-                        best,
-                        "video"
-                    )
-
-                    write_history({
-                        "url": url,
-                        "platform": "generic",
-                        "engine": "browser",
-                        "output": str(output),
-                    })
-
-                    if not no_open:
-
-                        open_downloaded_video(
-                            output
-                        )
-
-                    return 0
-
-            except Exception as error:
-
-                print(
-                    f"  ! Browser scanner failed: "
-                    f"{error}"
-                )
+        except Exception as dl_error:
+            print(f"\n[-] Download failed: {dl_error}", file=sys.stderr)
+            return 1
 
     # ========================================================
     # FAILURE
     # ========================================================
 
     print()
-    print(
-        "  ✗ No downloadable media found."
-    )
+    print("  ✗ No downloadable media found.")
     print()
 
     return 2

@@ -1,294 +1,284 @@
-# <img src="https://cdn.simpleicons.org/python/3776AB" width="28" height="28" align="center"/> **Video Extractor**
+# <img src="https://cdn.simpleicons.org/ffmpeg/007808" width="28" height="28" align="center"/> **Video Extractor**
 
-### *High-performance multi-tier CLI video and stream extractor for mobile and terminal environments*
+### *Resilient CLI tool that extracts and downloads video streams from any URL*
 
 <div align="center">
-<img src="https://img.shields.io/badge/Language-Python_3.10+-3776AB?style=for-the-badge">
-<img src="https://img.shields.io/badge/Environment-Termux_Linux-04DE71?style=for-the-badge">
-<img src="https://img.shields.io/badge/Engine-yt--dlp-FF6C37?style=for-the-badge">
-<img src="https://img.shields.io/badge/Automation-Selenium-43B02A?style=for-the-badge">
-<img src="https://img.shields.io/badge/Processing-FFmpeg-007808?style=for-the-badge">
+<img src="https://img.shields.io/badge/Platform-Termux%20%2F%20Linux%20%2F%20Windows%20%2F%20macOS-3DDC84?style=for-the-badge">
+<img src="https://img.shields.io/badge/Python-3.x-3776AB?style=for-the-badge">
+<img src="https://img.shields.io/badge/Architecture-Concurrent%20Race-FF6F00?style=for-the-badge">
+<img src="https://img.shields.io/badge/LangGraph-Orchestrator-000000?style=for-the-badge">
+<img src="https://img.shields.io/badge/yt--dlp-Extractor%20Tier-FF0000?style=for-the-badge">
+<img src="https://img.shields.io/badge/Scrapling-Adaptive%20Tier-4285F4?style=for-the-badge">
+<img src="https://img.shields.io/badge/FFmpeg-Stream%20Muxer-007808?style=for-the-badge">
 </div>
 
 ---
 
-# <img src="https://cdn.simpleicons.org/gnubash/4EAA25" width="22" height="22" align="center"/> **Overview**
+# <img src="https://cdn.simpleicons.org/readme/000000" width="22" height="22" align="center"/> **Overview**
 
-**Video Extractor** is a resilient command-line tool for Android (Termux) and Linux environments that inspects, extracts, and downloads online videos and adaptive streams from virtually any web URL.
+**Video Extractor** is a concurrent multi-agent command-line media tool for Android (Termux), Linux, macOS, and Windows that inspects, extracts, and downloads online videos and adaptive streams from virtually any web URL.
 
-It uses:
+Instead of a slow sequential waterfall, Video Extractor runs a simultaneous **Concurrent Multi-Agent Race** across four independent extraction tiers:
 
-* **yt-dlp Engine** — Primary high-speed native format extraction and adaptive stream muxing
-* **Static DOM Scanner** — BeautifulSoup4 and Requests for parsing HTML video tags, JSON-LD, and embedded scripts
-* **Headless Browser Sniffer** — Selenium and Chromium performance log interception for JavaScript-rendered players
-* **FFmpeg Pipeline** — Direct stream copying, muxing, and formatted media saving to local storage
+* **yt-dlp** — primary extraction engine for thousands of supported sites and adaptive formats
+* **Scrapling** — adaptive parser and stealth browser extractor with auto-relocating selectors and anti-bot escalation
+* **BeautifulSoup** — static HTML DOM and JSON-LD scanner
+* **Selenium + Headless Chromium** — browser-level network sniffer that captures M3U8/MPD streams from JS-rendered pages
+* **FFmpeg** — merges adaptive video and audio tracks into a clean MP4 output with zero re-encoding
 
-> Designed specifically for command-line power users who need reliable video downloads across both supported streaming sites and arbitrary web pages with embedded players.
+> Built for terminal environments where multi-tier extraction speed, bot resilience, and cross-platform terminal orchestration matter.
 
 ---
 
 # <img src="https://cdn.simpleicons.org/diagramsdotnet/F08705" width="22" height="22" align="center"/> **Architecture**
 
 ```
-                     [ User Input / CLI Invocation ]
-                                    ↓
-                     [ Router Platform Identification ]
-                                    ↓
-       ┌──────────────────────────────────────────────────────────┐
-       │             3-TIER EXTRACTION CASCADE ENGINE             │
-       │                                                          │
-       │ 1. Native Site Extractor (yt-dlp)                        │
-       │    └── Fast direct format extraction & resolution match   │
-       │                                                          │
-       │ 2. Static HTML / DOM Scanner (Requests + BeautifulSoup)  │
-       │    └── Inspects <video>, <iframe>, JSON-LD & JS patterns │
-       │                                                          │
-       │ 3. Headless Browser Sniffer (Selenium + Chromium)        │
-       │    └── Intercepts network logs for M3U8, MPD & JS media  │
-       └──────────────────────────────────────────────────────────┘
-                                    ↓
-                     [ Selector Candidate Scoring ]
-                                    ↓
-                  [ FFmpeg Stream Copy & Muxing Engine ]
-                                    ↓
-                     [ Output Saved to /sdcard/Download ]
+User Input — video "URL" [--quality 1080p] [--race-timeout 20] [--no-browser]
+                    |
+                    v
+           [ Router / Platform Identifier ]
+           Matches URL: YouTube | Vimeo | Dailymotion | TNAFlix | Generic
+                    |
+                    v
+    +==============================================================+
+    |       CONCURRENT MULTI-AGENT EXTRACTION RACE (LangGraph)     |
+    +==============================================================+
+         |               |                    |                |
+         | (parallel)    | (parallel)         | (parallel)     | (parallel)
+         v               v                    v                v
+  +--------------+ +--------------+    +--------------+ +--------------+
+  | Tier 1 Agent | | Tier 2 Agent |    | Tier 3 Agent | | Tier 4 Agent |
+  |    yt-dlp    | | Static HTML  |    |   Browser    | |  Scrapling   |
+  |  Extractor   | | Scanner (BS4)|    | Sniffer (Cr) | |   Adaptive   |
+  +--------------+ +--------------+    +--------------+ +--------------+
+         \               |                    |                /
+          \              |                    |               /
+           +-------------+--------------------+--------------+
+                                 |
+                                 v
+                +----------------------------------+
+                |    Winner Reducer Node           |
+                |    First valid candidate wins!   |
+                |    Kills losing tier PIDs        |
+                +----------------------------------+
+                                 |
+                                 v
+                     [ FFmpeg Downloader ]
+            Stream-copies or muxes tracks -> output MP4
+                                 |
+                                 v
+            /sdcard/Download/  (or configured directory)
 ```
 
 ---
 
-# <img src="https://cdn.simpleicons.org/element/00D1B2" width="22" height="22" align="center"/> **Features**
+# <img src="https://cdn.simpleicons.org/sparkpost/FFA500" width="22" height="22" align="center"/> **Features**
 
-### <img src="https://cdn.simpleicons.org/youtube/FF0000" width="18" height="18" align="center"/> Multi-Tiered Extraction Cascade
-Automatically attempts direct site extraction via yt-dlp, falling back to static HTML DOM scanning, and finally headless browser network interception if JavaScript rendering is required.
+### <img src="https://cdn.simpleicons.org/serverless/FD5750" width="18" height="18" align="center"/> Concurrent Multi-Agent Tier Racing
+Spawns yt-dlp, static HTML scanning, headless Chromium sniffing, and Scrapling simultaneously. The earliest tier to find a valid candidate above the confidence score threshold wins, and all losing processes are killed immediately by PID.
 
-### <img src="https://cdn.simpleicons.org/speedtest/00C4B3" width="18" height="18" align="center"/> Intelligent Media Scoring Engine
-Evaluates media candidates by resolution, height, width, bitrate, frame rate, MIME type, and protocol priority (M3U8 HLS, MPD DASH, direct MP4/WebM).
+### <img src="https://cdn.simpleicons.org/speedtest/0052CC" width="18" height="18" align="center"/> Scrapling Adaptive Extractor Tier
+Leverages Scrapling for high-speed plain HTTP fetching (`Fetcher`) with seamless escalation to stealth browser browsing (`StealthyFetcher`) if challenged by anti-bot protections, featuring auto-relocating DOM selectors and markdown fallback.
 
-### <img src="https://cdn.simpleicons.org/selenium/43B02A" width="18" height="18" align="center"/> Headless Browser Sniffer
-Launches headless Chromium via Selenium to capture dynamic media network traffic, bypass anti-scraping layers, and locate hidden video stream manifests.
+### <img src="https://cdn.simpleicons.org/gnometerminal/241F31" width="18" height="18" align="center"/> OS-Agnostic Terminal Spawner
+Spawns dedicated terminal windows or tabs per extraction tier across Windows (Windows Terminal `wt.exe` / `start`), macOS (`osascript`), desktop Linux (`gnome-terminal`, `konsole`, `xterm`), and Termux (`tmux` / background subprocesses).
 
-### <img src="https://cdn.simpleicons.org/android/34A853" width="18" height="18" align="center"/> Termux & Storage Utilities
-Includes integrated history tracking (`--history`), video storage cleanup (`--clean`), direct Android player launching (`termux-open`), and automated updater shell scripts (`--update`).
+### <img src="https://cdn.simpleicons.org/youtube/FF0000" width="18" height="18" align="center"/> Platform-Specific Routes
+Dedicated route matchers for YouTube, Vimeo, Dailymotion, TNAFlix, and a Generic catch-all dispatch each URL to optimal extractor profiles without manual intervention.
+
+### <img src="https://cdn.simpleicons.org/ffmpeg/007808" width="18" height="18" align="center"/> Adaptive Format Selection
+Uses yt-dlp's `bv*+ba/b` format selector to pull the highest-fidelity video and audio tracks, then merges them into a single MP4 via FFmpeg stream copying without lossy re-encoding.
+
+### <img src="https://cdn.simpleicons.org/qualcomm/3253DC" width="18" height="18" align="center"/> Quality Flag & Race Timeout
+Pass `--quality 1080p` to enforce target resolution filters, and `--race-timeout 20` to guarantee hung network tiers terminate cleanly without blocking the CLI.
+
+### <img src="https://cdn.simpleicons.org/files/4285F4" width="18" height="18" align="center"/> Persistent Download History
+Every successful download is logged to `config/history.json` with target URL, platform, winning engine, file path, quality, and multi-agent `race_duration_ms` — viewable anytime via `video --history`.
+
+### <img src="https://cdn.simpleicons.org/linux/000000" width="18" height="18" align="center"/> Cross-Platform & Mobile Native
+Runs natively on Android Termux, standard Linux distributions, macOS, and Windows. Uses platform-native openers (`termux-open`, `xdg-open`, `open`, `os.startfile`) for instant post-download playback.
+
+### <img src="https://cdn.simpleicons.org/amazons3/FF9900" width="18" height="18" align="center"/> Built-in Cleanup and Picker
+`video --clean` scans the download directory, reports total video storage, and offers prompted cleanup. `video --open` launches an interactive numbered menu to pick and play any downloaded file.
 
 ---
 
-# <img src="https://cdn.simpleicons.org/stackblitz/1389FD" width="22" height="22" align="center"/> **Tech Stack**
+# <img src="https://cdn.simpleicons.org/layers/555555" width="22" height="22" align="center"/> **Tech Stack**
 
 | Layer | Technology |
 |-------|------------|
-| Core Language | Python 3.10+ |
-| Shell CLI | Bash / Termux |
-| Primary Extractor | yt-dlp |
-| HTML Parser | BeautifulSoup4 & Requests |
-| Network Automation | Selenium WebDriver |
-| Headless Browser | Chromium / Chromedriver |
-| Media Transcoding | FFmpeg |
-| Storage & Configuration | JSON (`config.json`, `history.json`) |
+| CLI Launcher | Bash (`bin/video`) |
+| Entry Point | Python 3 (`src/main.py`) |
+| Platform Router | Custom dataclass registry (`src/router.py`) |
+| Race Coordinator | LangGraph (`src/race_controller.py`) |
+| Terminal Spawner | Cross-platform spawner (`src/terminal_launcher.py`) |
+| Adaptive Extractor | Scrapling (`src/scrapling_scanner.py`) |
+| Primary Extractor | yt-dlp (`src/site_extractor.py`) |
+| Static Fallback | BeautifulSoup 4 + Requests (`src/static_scanner.py`) |
+| Browser Fallback | Selenium + Headless Chromium (`src/browser_scanner.py`) |
+| Candidate Scoring | Custom scorer (`src/candidate.py`, `src/selector.py`) |
+| Stream Merger | FFmpeg (`src/downloader.py`) |
+| Config + History | JSON (`config/config.json`, `config/history.json`) |
+| Progress Display | Custom terminal spinner (`src/progress.py`) |
 
 ---
 
-# <img src="https://cdn.simpleicons.org/terminal/4D4D4D" width="22" height="22" align="center"/> **Setup**
+# <img src="https://cdn.simpleicons.org/gnometerminal/241F31" width="22" height="22" align="center"/> **Setup**
 
-### **Termux Key Concepts**
-Before installing, note the distinction between these key elements in Termux:
-* **Project Directory**: The root folder containing the codebase (`$HOME/video-Downloader-CLI-tool`).
-* **Executable Launcher**: The shell script at `bin/video` that executes the application.
-* **PATH**: The environment variable (`$PATH`) listing directories where the shell searches for executable commands.
-* **Termux System Bin (`$PREFIX/bin`)**: Termux's default system binary directory (`/data/data/com.termux/files/usr/bin`), which is included in `$PATH` by default.
-
-> **Note:** Cloning the repository does **not** automatically make `video` available globally in your shell. You must explicitly configure your PATH or create a symlink as shown in Step 5.
-
----
-
-### **Installation & Setup Steps**
-
-1. **Install Prerequisites:**
-
-Ensure Android + Termux are installed, then update packages and install required tools:
+1. **Clone the repository into your home directory:**
 
 ```bash
-pkg update && pkg install git python ffmpeg x11-repo chromium -y
+git clone https://github.com/ItzPnav/video-Downloader-CLI-tool.git ~/video-extractor
 ```
 
-2. **Clone and Enter the Repository:**
+2. **Install Python dependencies:**
 
 ```bash
-git clone https://github.com/ItzPnav/video-Downloader-CLI-tool.git
-cd video-Downloader-CLI-tool
+pip install -r ~/video-extractor/requirements.txt
 ```
 
-3. **Install Python Dependencies:**
+3. **Install Scrapling browser binaries for stealth fetcher:**
 
 ```bash
-pip install -r requirements.txt
+scrapling install
 ```
 
-4. **Make CLI Launchers Executable:**
+4. **Install system binaries (Termux):**
 
 ```bash
-chmod +x bin/video bin/video-update
+pkg update && pkg install ffmpeg python chromium
 ```
 
-5. **Make `video` Available System-Wide:**
-
-Choose **Option A (Preferred)** or **Option B**:
-
-* **Option A: Add `bin` to PATH (Preferred)**
-  Adds the project's `bin` directory (`$HOME/video-Downloader-CLI-tool/bin`) to your shell environment. This does not copy or move any scripts into system folders, making it ideal if you may move or pull updates to the repository directory later.
-
-  ```bash
-  echo 'export PATH="$HOME/video-Downloader-CLI-tool/bin:$PATH"' >> ~/.bashrc
-  source ~/.bashrc
-  ```
-
-* **Option B: Symlink to `$PREFIX/bin` (Alternative)**
-  Creates a symbolic link inside Termux's standard system binary folder (`$PREFIX/bin`), which is already included in PATH. Convenient when the project repository remains in a fixed location (`$HOME/video-Downloader-CLI-tool`).
-
-  ```bash
-  ln -s "$HOME/video-Downloader-CLI-tool/bin/video" "$PREFIX/bin/video"
-  ```
-
-Verify system-wide availability:
+5. **Install system binaries (Debian / Ubuntu):**
 
 ```bash
-video --help
+sudo apt update && sudo apt install ffmpeg python3 chromium-driver
 ```
 
-6. **Grant Storage Permission:**
+6. **Make the launcher executable:**
+
+```bash
+chmod +x ~/video-extractor/bin/video
+chmod +x ~/video-extractor/bin/video-update
+```
+
+7. **Add the launcher to your PATH (Termux):**
+
+```bash
+echo 'export PATH="$HOME/video-extractor/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+Alternatively, create a symlink so the command is available system-wide:
+
+```bash
+ln -s ~/video-extractor/bin/video $PREFIX/bin/video
+```
+
+8. **Grant storage access (Termux only):**
 
 ```bash
 termux-setup-storage
 ```
 
----
-
-### **Usage & First-Run Examples**
-
-1. **Display Help and CLI Options:**
+9. **Run it:**
 
 ```bash
-video --help
+video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
-2. **Basic Video Download:**
+---
 
-```bash
-video "https://www.youtube.com/watch?v=example"
-```
+# <img src="https://cdn.simpleicons.org/shieldsdotio/00B4D8" width="22" height="22" align="center"/> **Production Tips**
 
-3. **Specify Video Quality:**
-
-```bash
-video --quality 1080p "https://www.youtube.com/watch?v=example"
-```
-
-> The downloader requests the specified resolution (e.g., `1080p`) when available, falling back to the nearest suitable format based on the project's quality-selection logic.
-
-4. **Useful Management Commands:**
-
-* Check version and download history:
-  ```bash
-  video --version
-  ```
-* Open an interactive picker to play downloaded videos:
-  ```bash
-  video --open
-  ```
-* Scan and interactively clean up downloaded video files to free storage space:
-  ```bash
-  video --clean
-  ```
+* Always keep `yt-dlp` updated — run `pip install -U yt-dlp` regularly as websites frequently alter extraction signatures.
+* Set `"use_browser": false` in `config/config.json` or pass `--no-browser` on low-memory devices where Chromium is unavailable.
+* Run `scrapling install` once during initial setup so Scrapling's stealth browser dependencies are cached locally.
+* Use `--no-terminals` in headless SSH environments or script automation to suppress GUI terminal window creation.
+* Adjust `"race_timeout": 20` in `config/config.json` depending on network latency conditions.
+* The default download directory is `/sdcard/Download` on Termux. Update `"download_directory"` in `config/config.json` for Linux/macOS/Windows desktop setups.
 
 ---
 
-# <img src="https://cdn.simpleicons.org/shield/FFD700" width="22" height="22" align="center"/> **Production Tips**
+# <img src="https://cdn.simpleicons.org/roadmapdotsh/7C3AED" width="22" height="22" align="center"/> **Roadmap**
 
-* Keep `yt-dlp` updated regularly using `./bin/video-update` or `pip install --upgrade yt-dlp` to maintain site compatibility.
-* Adjust `browser_wait_seconds` in `config/config.json` when downloading from heavy single-page applications or slow connections.
-* Pass the `--no-browser` flag for faster extraction on plain HTML sites or simple media links.
-* Use `--quality 1080p` to explicitly specify maximum resolution targets.
-
----
-
-# <img src="https://cdn.simpleicons.org/roadmapdotsh/000000" width="22" height="22" align="center"/> **Roadmap**
-
-* [ ] Batch URL downloading from input files
-* [ ] Audio-only extraction mode (MP3/AAC convert flags)
-* [ ] Multi-threaded segment download acceleration for fragmented streams
+* [ ] Cookie injection support for authenticated streams
+* [ ] Playlist batch download with concurrent item queues
+* [ ] Quality selection interactive terminal menu (TUI)
+* [ ] Subtitle and caption extraction with MP4 embedding
+* [ ] Auto-detect and install missing system dependencies
+* [ ] Interactive config editor command (`video --config`)
 
 ---
 
-# <img src="https://cdn.simpleicons.org/1password/0094F5" width="22" height="22" align="center"/> **Security Notes**
+# <img src="https://cdn.simpleicons.org/letsencrypt/003A70" width="22" height="22" align="center"/> **Security Notes**
 
-* Always keep Python dependencies (`requests`, `yt-dlp`) updated to patch potential media parsing vulnerabilities.
-* The browser scanner runs Chromium with security flags in headless mode (`--no-sandbox`, `--disable-gpu`).
-* Downloaded files undergo string sanitization to prevent directory traversal or unsafe shell characters in file names.
-
----
-
-# <img src="https://cdn.simpleicons.org/matrix/000000" width="22" height="22" align="center"/> **Troubleshooting**
-
-* **`video: command not found`**
-  Ensure Step 5 of Setup was executed. Add `$HOME/video-Downloader-CLI-tool/bin` to `~/.bashrc` and run `source ~/.bashrc`, or create the symlink via `ln -s "$HOME/video-Downloader-CLI-tool/bin/video" "$PREFIX/bin/video"`.
-
-* **Python Dependency Errors**
-  If module import errors occur, re-run `pip install -r requirements.txt`. Ensure `python` and `pip` are updated in Termux.
-
-* **Missing FFmpeg Error**
-  If stream copy or muxing fails due to a missing FFmpeg binary, install FFmpeg via Termux:
-  ```bash
-  pkg install ffmpeg -y
-  ```
-
-* **Missing yt-dlp Error**
-  If native site extraction fails, update or reinstall yt-dlp:
-  ```bash
-  pip install --upgrade yt-dlp
-  ```
-
-* **Chromium / Selenium Problems**
-  If the headless browser sniffer fails, verify Chromium is installed (`pkg install x11-repo && pkg install chromium -y`). If browser scanning is not required for your target URL, pass `--no-browser` to bypass Selenium initialization.
+* `config/history.json` stores download URLs in plaintext — keep permissions restricted on multi-user systems.
+* Never commit personal cookies or API tokens to `config/config.json`.
+* Browser scanner and stealth fetcher execute headless browsers with network logging enabled — only extract trusted URLs.
+* URL validation enforces strict `http://` or `https://` protocol schemes.
 
 ---
 
-# <img src="https://cdn.simpleicons.org/filepath/2A2A2A" width="22" height="22" align="center"/> **Folder Structure**
+# <img src="https://cdn.simpleicons.org/files/4285F4" width="22" height="22" align="center"/> **Troubleshooting**
+
+* **Scrapling stealth fetcher missing browsers:** Run `scrapling install` in your terminal to download browser binaries.
+* **Chromium version mismatch on Linux:** Ensure `chromium-driver` matches the installed `chromium` package version.
+* **No GUI terminal spawning:** Pass `--no-terminals` or verify your desktop environment has `DISPLAY` or `WAYLAND_DISPLAY` set.
+* **Storage permission denied on Android:** Run `termux-setup-storage` and grant permission when prompted by Android.
+
+---
+
+# <img src="https://cdn.simpleicons.org/files/4285F4" width="22" height="22" align="center"/> **Folder Structure**
 
 ```
-video-Downloader-CLI-tool/
-│
-├── bin/
-│   ├── video                  # Executable CLI launcher script
-│   └── video-update           # Automated system & dependency updater
-│
-├── config/
-│   ├── config.json            # Extractor settings & user preferences
-│   └── history.json           # Log of previous downloads
-│
-├── src/
-│   ├── extractors/            # Specialized engine wrappers (youtube, generic)
-│   ├── routes/                # URL pattern matchers and domain handlers
-│   ├── browser_scanner.py     # Selenium network sniffer engine
-│   ├── candidate.py           # Candidate model and scoring logic
-│   ├── downloader.py          # FFmpeg stream downloader
-│   ├── main.py                # Main CLI entry point and flag dispatcher
-│   ├── progress.py            # Terminal spinner and progress bar renderer
-│   ├── router.py              # Platform router registry
-│   ├── selector.py            # Resolution and candidate ranking algorithm
-│   ├── site_extractor.py      # Native yt-dlp integration wrapper
-│   ├── static_scanner.py      # HTML/DOM BeautifulSoup scanner
-│   └── utils.py               # Shared utility functions and logging
-│
-├── .gitignore                 # Git ignored files configuration
-├── README.md                  # Project documentation
-├── requirements.txt           # Python dependency requirements
-└── VERSION                    # Extractor version indicator
+video-extractor/
+|
++-- bin/
+|   +-- video                  # Shell launcher -- sets PYTHONPATH and exec python
+|   +-- video-update           # Automated system updater script
+|
++-- config/
+|   +-- config.json            # Preferences, race timeout, and engine toggles
+|   +-- history.json           # Persistent download history with race_duration_ms
+|
++-- src/
+|   +-- main.py                # CLI entry point, argument parser, race dispatcher
+|   +-- race_controller.py     # LangGraph concurrent multi-agent race coordinator
+|   +-- terminal_launcher.py   # OS-agnostic terminal and process spawner
+|   +-- agent_worker.py        # Independent tier worker process executor
+|   +-- scrapling_scanner.py   # Scrapling adaptive fetcher and DOM scanner tier
+|   +-- site_extractor.py      # yt-dlp extraction wrapper and format selector
+|   +-- static_scanner.py      # HTML/JSON-LD/JS regex scanner (BeautifulSoup)
+|   +-- browser_scanner.py     # Selenium + Chromium network performance sniffer
+|   +-- candidate.py           # Media candidate model and scoring logic
+|   +-- selector.py            # Candidate ranking algorithm
+|   +-- downloader.py          # FFmpeg stream copy and download executor
+|   +-- progress.py            # Terminal spinner and progress bar renderer
+|   +-- utils.py               # Config loader, filename sanitizer, history writer
+|   +-- router.py              # Platform identifier and route registry
+|   +-- routes/                # Domain-specific matchers (youtube, vimeo, etc.)
+|
++-- tests/                     # Unit and integration test suite
+|   +-- test_scrapling_scanner.py
+|   +-- test_terminal_launcher.py
+|   +-- test_race_controller.py
+|   +-- test_integration.py
+|
++-- requirements.txt           # Python dependencies
++-- README.md                  # Project documentation
++-- PROJECT.md                 # Architecture and project overview
++-- FEATURES.md                # Feature inventory and capabilities
++-- SPEC.md                    # Technical specification and schemas
++-- ARCHITECTURE.md            # Paradigm shift and LangGraph design
++-- IMPLEMENTATION.md          # Technical implementation guide
++-- GEMINI.md                  # Project memory and rules
 ```
 
 ---
 
 # <img src="https://cdn.simpleicons.org/git/F05032" width="22" height="22" align="center"/> **Contributing**
 
-PRs and issues are welcome. Feel free to fork the repository, add new site routing rules, or submit performance improvements.
+PRs and issues are welcome. Fork freely and build on top of this.
 
 ---
 
@@ -298,12 +288,15 @@ MIT License — use freely.
 
 ---
 
-# <img src="https://cdn.simpleicons.org/github/181717" width="22" height="22" align="center"/> **Credits**
+# <img src="https://cdn.simpleicons.org/githubsponsors/EA4AAA" width="22" height="22" align="center"/> **Credits**
 
-* [yt-dlp](https://github.com/yt-dlp/yt-dlp) — Primary media extraction engine
-* [FFmpeg](https://ffmpeg.org/) — Stream processing and video muxing
-* [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/) — HTML DOM parsing library
-* [Selenium](https://www.selenium.dev/) — Headless browser network sniffer
+* [yt-dlp](https://github.com/yt-dlp/yt-dlp) — primary video extraction engine powering the first extraction tier
+* [Scrapling](https://github.com/D4Vinci/Scrapling) — adaptive parser and stealth crawler powering the fourth tier
+* [FFmpeg](https://ffmpeg.org) — stream muxing and format merging for adaptive video and audio tracks
+* [LangGraph](https://github.com/langchain-ai/langgraph) — orchestrator managing the concurrent multi-agent race and winner reduction
+* [BeautifulSoup 4](https://www.crummy.com/software/BeautifulSoup/) — HTML DOM parsing for the static scanner tier
+* [Selenium](https://selenium.dev) — browser automation driving the headless Chromium network sniffer
+* [Requests](https://requests.readthedocs.io) — HTTP HEAD inspection and content-type probing in static scanning
 
 ---
 

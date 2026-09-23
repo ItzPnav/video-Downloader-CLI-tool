@@ -112,12 +112,12 @@ def main():
                 f"{video.get_attribute('src')}"
             )
 
+            current_src = driver.execute_script(
+                "return arguments[0].currentSrc",
+                video
+            )
             print(
-                f"        currentSrc: "
-                f"{driver.execute_script("
-                    "return arguments[0].currentSrc",
-                    video
-                )}"
+                f"        currentSrc: {current_src}"
             )
 
         # ----------------------------------------------------

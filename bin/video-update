@@ -1,6 +1,18 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 
-PROJECT="$HOME/video-extractor"
+# Resolve project root dynamically
+PRG="$0"
+while [ -h "$PRG" ]; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`/"$link"
+    fi
+done
+BIN_DIR=`dirname "$PRG"`
+PROJECT=`cd "$BIN_DIR/.." && pwd`
 
 echo
 echo "========================================"
@@ -8,17 +20,34 @@ echo "       VIDEO EXTRACTOR UPDATE"
 echo "========================================"
 echo
 
-echo "[+] Updating Termux packages..."
-pkg update -y
+if command -v pkg >/dev/null 2>&1; then
+    echo "[+] Updating Termux packages..."
+    pkg update -y
+fi
 
 echo
 echo "[+] Updating Python dependencies..."
 
-python -m pip install --upgrade \
+PYTHON_BIN="python3"
+if ! command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+fi
+
+"$PYTHON_BIN" -m pip install --upgrade \
     requests \
     beautifulsoup4 \
     yt-dlp \
-    selenium
+    selenium \
+    "scrapling[fetchers]" \
+    langgraph \
+    psutil \
+    markdownify
+
+echo
+echo "[+] Updating Scrapling browser dependencies..."
+if command -v scrapling >/dev/null 2>&1; then
+    scrapling install
+fi
 
 echo
 echo "[+] Checking FFmpeg..."
@@ -27,20 +56,24 @@ if command -v ffmpeg >/dev/null 2>&1; then
     echo "[✓] FFmpeg OK"
 else
     echo "[!] FFmpeg missing"
-    echo "[+] Installing FFmpeg..."
-    pkg install ffmpeg -y
+    if command -v pkg >/dev/null 2>&1; then
+        echo "[+] Installing FFmpeg via pkg..."
+        pkg install ffmpeg -y
+    fi
 fi
 
 echo
 echo "[+] Checking Chromium..."
 
-if command -v chromium-browser >/dev/null 2>&1; then
+if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
     echo "[✓] Chromium OK"
 else
     echo "[!] Chromium missing"
-    echo "[+] Installing Chromium..."
-    pkg install x11-repo -y
-    pkg install chromium -y
+    if command -v pkg >/dev/null 2>&1; then
+        echo "[+] Installing Chromium via pkg..."
+        pkg install x11-repo -y
+        pkg install chromium -y
+    fi
 fi
 
 echo

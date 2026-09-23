@@ -21,6 +21,10 @@ bin/video-update           ← Automated system and dependency updater script
 config/config.json         ← Application configuration and user preferences
 config/history.json        ← Persistent download history log
 src/main.py                ← CLI entry point, argument parser, and flow controller
+src/terminal_launcher.py   ← OS-agnostic terminal and process spawner
+src/race_controller.py     ← LangGraph concurrent multi-agent race coordinator
+src/agent_worker.py        ← Independent worker process executor per tier
+src/scrapling_scanner.py   ← Scrapling adaptive fetcher and DOM scanner tier
 src/router.py              ← Platform identification and router registry
 src/routes/                ← Domain matchers (youtube, vimeo, dailymotion, tnaflix, generic)
 src/site_extractor.py      ← Native yt-dlp extraction wrapper and format selector
@@ -51,7 +55,11 @@ Configuration lives in `config/config.json`:
   "browser_wait_seconds": 8,
   "use_ytdlp": true,
   "use_static_scanner": true,
-  "use_browser": true
+  "use_browser": true,
+  "use_scrapling": true,
+  "race_timeout": 20,
+  "confidence_threshold": 50,
+  "spawn_terminals": true
 }
 ```
 
@@ -64,7 +72,8 @@ Download history lives in `config/history.json` as an array of download records:
     "platform": "string",
     "engine": "string",
     "quality": "string | null",
-    "output": "string | null"
+    "output": "string | null",
+    "race_duration_ms": "number | null"
   }
 ]
 ```
@@ -85,20 +94,30 @@ Download history lives in `config/history.json` as an array of download records:
 
 ## 6. EXTRACTION ENGINE CONTRACTS
 
+### Concurrent Race Controller (`src/race_controller.py`)
+- **Model:** Parallel LangGraph StateGraph connecting 4 simultaneous extractor agents feeding into a 'first successful result wins' reducer node.
+- **Winner Action:** Terminates all losing agent processes by PID immediately upon first winner above confidence threshold.
+- **Timeout:** Defaults to 20s (`--race-timeout`).
+
+### Scrapling Adaptive Scanner (`src/scrapling_scanner.py`)
+- **Model:** Peer extraction agent alongside yt-dlp, static scanner, and browser sniffer.
+- **Fetching:** Fast plain HTTP (`Fetcher.get`) by default; escalates to `StealthyFetcher.fetch(headless=True)` if blocked.
+- **Parsing:** Adaptive selector DOM queries with auto-relocation, regex passes, and markdown clean-text fallback.
+
 ### Native Site Extractor (`src/site_extractor.py`)
 - **Detection/entry condition:** Supported domains or site supported by yt-dlp.
 - **Key CLI tool:** `yt-dlp --dump-single-json`
-- **Fallback:** Falls back to Static Scanner if yt-dlp extraction fails or returns no formats.
+- **Output:** Native format selector (bv*+ba/b) and FFmpeg muxing.
 
 ### Static HTML Scanner (`src/static_scanner.py`)
-- **Detection/entry condition:** Generic URLs or site extractor fallback.
+- **Detection/entry condition:** Generic URLs or parallel peer in race.
 - **Key DOM/API:** BeautifulSoup parsing of `<video>`, `<iframe>`, `source`, `JSON-LD`, and JS string regex patterns.
-- **Fallback:** Performs HTTP HEAD inspection scoring; falls back to Browser Scanner if no candidates found.
+- **Inspection:** HTTP HEAD probing scoring.
 
 ### Headless Browser Sniffer (`src/browser_scanner.py`)
-- **Detection/entry condition:** Triggered when static scanning yields no media candidates or JS rendering is required.
+- **Detection/entry condition:** Parallel peer in race for JS-rendered streams.
 - **Key API:** Selenium Chrome performance logs (`Network.responseReceived`).
-- **Fallback:** Filters for M3U8, MPD, MP4 streams; aborts gracefully if Chromium or Chromedriver is missing.
+- **Output:** Captures M3U8, MPD, MP4 network streams; aborts gracefully if Chromium/Chromedriver is missing.
 
 ---
 
@@ -142,7 +161,7 @@ Header → Overview → Architecture → Features → Tech Stack → Setup → P
   - `[!]` Warning / Fallback notice
   - `[-]` Error message
 - **Python Conventions:** Clean modular imports, dataclasses for candidates and routes, explicit exception handling around network/subprocess calls.
-- **Dependencies:** Standard library + `requests`, `beautifulsoup4`, `yt-dlp`, `selenium`.
+- **Dependencies:** Standard library + `requests`, `beautifulsoup4`, `yt-dlp`, `selenium`, `scrapling`, `langgraph`, `psutil`, `markdownify`.
 
 ---
 
@@ -151,11 +170,12 @@ Header → Overview → Architecture → Features → Tech Stack → Setup → P
 | Thing | Value |
 |-------|-------|
 | Version | 0.2.0 |
-| Environment | Android (Termux) / Linux |
+| Environment | Android (Termux) / Linux / Windows / macOS |
+| Architecture | Concurrent Multi-Agent Race (LangGraph) |
+| Extraction Tiers | 4 (yt-dlp, Static HTML, Headless Chromium, Scrapling) |
 | Storage Backend | JSON (`config/config.json`, `config/history.json`) |
 | Default Download Dir | `/sdcard/Download` |
-| Primary Extractor | yt-dlp |
-| Browser Automation | Selenium + Headless Chromium |
+| Primary Engines | yt-dlp, Scrapling, BeautifulSoup, Selenium |
 | Stream Transcoder | FFmpeg |
 | Main Entry Point | `bin/video` -> `src/main.py` |
 

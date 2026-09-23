@@ -11,9 +11,97 @@
     "output": "/sdcard/Download/video.mp4"
   },
   {
-    "url": "https://xxxbp.tv/video/685678/okichloeo-chloe-rannoch-xxx",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "platform": "youtube",
+    "type": "video",
+    "quality": null
+  },
+  {
+    "url": "https://example.com/test-race-video",
     "platform": "generic",
-    "engine": "static",
-    "output": "/sdcard/Download/video.mp4"
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
   }
 ]

@@ -1,18 +1,26 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 
-PROJECT="$HOME/video-extractor"
+# Resolve directory of this script, following symlinks
+PRG="$0"
+while [ -h "$PRG" ]; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`/"$link"
+    fi
+done
+BIN_DIR=`dirname "$PRG"`
+PROJECT=`cd "$BIN_DIR/.." && pwd`
 SRC="$PROJECT/src"
 
-if [ "$#" -eq 0 ]; then
-    echo
-    echo "Video Extractor"
-    echo
-    echo "Usage:"
-    echo '  video "URL"'
-    echo
-    exit 1
+export SRC
+export PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}"
+
+PYTHON_BIN="python3"
+if ! command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python"
 fi
 
-export PYTHONPATH="$SRC"
-
-exec python "$SRC/main.py" "$@"
+exec "$PYTHON_BIN" "$SRC/main.py" "$@"

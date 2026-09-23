@@ -2,3 +2,7 @@ requests
 beautifulsoup4
 yt-dlp
 selenium
+scrapling[fetchers]
+markdownify
+langgraph
+psutil

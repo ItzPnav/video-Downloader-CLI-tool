@@ -23,15 +23,51 @@ def load_config():
         return {}
 
 
+def get_download_dir():
+
+    config = load_config()
+    target = config.get("download_directory", "")
+
+    if target:
+        p = Path(target)
+
+        # On Termux or if path exists
+        if p.exists():
+            return p
+
+        # On Windows non-Termux, convert /sdcard/Download to local project folder
+        if str(target).startswith(("/sdcard", "\\sdcard")):
+            if not Path("/sdcard").exists():
+                fallback = ROOT / "downloaded-video"
+                fallback.mkdir(parents=True, exist_ok=True)
+                return fallback
+
+        # Relative paths
+        if not p.is_absolute():
+            resolved = (ROOT / p).resolve()
+            resolved.mkdir(parents=True, exist_ok=True)
+            return resolved
+
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    default_dir = ROOT / "downloaded-video"
+    default_dir.mkdir(parents=True, exist_ok=True)
+    return default_dir
+
+
 def get_version():
 
     try:
-        return VERSION_PATH.read_text(
-            encoding="utf-8"
-        ).strip()
+        if VERSION_PATH.exists():
+            return VERSION_PATH.read_text(
+                encoding="utf-8"
+            ).strip()
+        config = load_config()
+        return config.get("version", "0.2.0")
 
     except Exception:
-        return "unknown"
+        return "0.2.0"
 
 
 def safe_filename(name):
