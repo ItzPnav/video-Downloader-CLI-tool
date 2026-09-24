@@ -11,7 +11,12 @@ import json
 import re
 from urllib.parse import urljoin, urlparse
 
-import requests
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    requests = None
+    REQUESTS_AVAILABLE = False
 
 from .candidate import (
     Candidate,

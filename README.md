@@ -98,6 +98,9 @@ Every successful download is logged to `config/history.json` with target URL, pl
 ### <img src="https://cdn.simpleicons.org/linux/000000" width="18" height="18" align="center"/> Cross-Platform & Mobile Native
 Runs natively on Android Termux, standard Linux distributions, macOS, and Windows. Uses platform-native openers (`termux-open`, `xdg-open`, `open`, `os.startfile`) for instant post-download playback.
 
+### <img src="https://cdn.simpleicons.org/gnometerminal/241F31" width="18" height="18" align="center"/> Interactive On-Screen Terminal Navigation
+Running `video` opens a full-screen interactive command center with arrow key navigation, keyboard shortcuts, live tier status, interactive video player, multi-select checklist cleaner, and runtime settings configurator.
+
 ### <img src="https://cdn.simpleicons.org/amazons3/FF9900" width="18" height="18" align="center"/> Built-in Cleanup and Picker
 `video --clean` scans the download directory, reports total video storage, and offers prompted cleanup. `video --open` launches an interactive numbered menu to pick and play any downloaded file.
 
@@ -109,6 +112,7 @@ Runs natively on Android Termux, standard Linux distributions, macOS, and Window
 |-------|------------|
 | CLI Launcher | Bash (`bin/video`) |
 | Entry Point | Python 3 (`src/main.py`) |
+| Terminal Dashboard | Zero-dependency keyboard UI (`src/video_downloader/menu.py`) |
 | Platform Router | Custom dataclass registry (`src/router.py`) |
 | Race Coordinator | LangGraph (`src/race_controller.py`) |
 | Terminal Spawner | Cross-platform spawner (`src/terminal_launcher.py`) |

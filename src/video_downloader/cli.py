@@ -25,23 +25,12 @@ from .utils import (
     write_history,
     safe_filename,
     get_download_dir,
+    get_config_dir,
     ROOT,
 )
 
 from urllib.parse import urlparse
 
-from .site_extractor import (
-    download as ytdlp_download,
-    extract_info,
-)
-
-from .static_scanner import StaticScanner
-from .selector import choose
-from .router import identify, describe
-from .progress import Spinner
-from .browser_scanner import BrowserScanner
-from .downloader import download
-from .race_controller import ExtractionRaceController
 
 
 def valid_url(url):
@@ -417,8 +406,9 @@ def show_help():
     print('  video "URL" [options]')
     print()
     print("Commands:")
-    print("  video                    Show this help")
+    print("  video                    Interactive terminal navigation menu (or help in pipe)")
     print('  video "URL"              Extract and download media')
+    print("  video --menu             Open interactive terminal menu")
     print("  video --help             Show help")
     print("  video --version          Show version")
     print("  video --history          Show download history")
@@ -431,6 +421,7 @@ def show_help():
     print("  --race-timeout 20        Multi-agent tier race timeout in seconds (default: 20)")
     print("  --browser-grace 2.5      Grace period before spawning heavy browser tier (default: 2.5s)")
     print("  --confidence 50          Minimum candidate score threshold to win (default: 50)")
+    print("  --auto-open              Automatically open video after download")
     print("  --no-open                Don't open video after download")
     print("  --spawn-terminals        Spawn separate GUI terminal windows per tier (default: single terminal)")
     print("  --no-terminals           Run race headlessly inside current terminal (default)")
@@ -438,6 +429,9 @@ def show_help():
     print("  --no-static              Exclude static scanner agent from race")
     print("  --no-browser             Exclude headless Chromium agent from race")
     print("  --no-scrapling           Exclude Scrapling agent from race")
+    print("  --replace                Overwrite destination file if it exists without prompt")
+    print("  --keep-both              Save as 'name (1).mp4' if destination exists without prompt")
+    print("  --skip-existing          Skip download if destination file already exists")
     print()
     print("Output:")
     print("  /sdcard/Download/ (or configured directory)")
@@ -452,7 +446,7 @@ def show_version():
 
 def show_history():
     import json
-    history_file = ROOT / "config" / "history.json"
+    history_file = get_config_dir() / "history.json"
 
     if not history_file.exists():
         print()
@@ -534,14 +528,24 @@ def main():
     args = sys.argv[1:]
 
     # ========================================================
-    # NO ARGUMENTS
+    # NO ARGUMENTS / INTERACTIVE MENU
     # ========================================================
 
     if not args:
+        if sys.stdin.isatty():
+            from .menu import run_interactive_menu
+            return run_interactive_menu()
 
         show_help()
-
         return 0
+
+    if args[0] in (
+        "--menu",
+        "-m",
+        "menu"
+    ):
+        from .menu import run_interactive_menu
+        return run_interactive_menu()
 
     # ========================================================
     # HELP
@@ -622,6 +626,7 @@ def main():
     # ========================================================
 
     no_open = False
+    auto_open_flag = None
     no_browser = False
     no_ytdlp = False
     no_static = False
@@ -631,6 +636,7 @@ def main():
     browser_grace = None
     confidence_threshold = None
     requested_quality = None
+    conflict_policy = None
     url = None
 
     index = 0
@@ -639,7 +645,20 @@ def main():
 
         arg = args[index]
 
-        if arg == "--no-open":
+        if arg == "--replace":
+            conflict_policy = "replace"
+
+        elif arg == "--keep-both":
+            conflict_policy = "keep_both"
+
+        elif arg == "--skip-existing":
+            conflict_policy = "skip"
+
+        elif arg == "--auto-open":
+            auto_open_flag = True
+
+        elif arg == "--no-open":
+            auto_open_flag = False
             no_open = True
 
         elif arg == "--no-browser":
@@ -765,6 +784,7 @@ def main():
     # ROUTE URL
     # ========================================================
 
+    from .router import identify
     route = identify(url)
 
     print()
@@ -791,6 +811,9 @@ def main():
     # CONCURRENT MULTI-AGENT EXTRACTION RACE
     # ========================================================
 
+    from .race_controller import ExtractionRaceController
+    from .downloader import download
+
     controller = ExtractionRaceController(
         url=url,
         requested_quality=requested_quality,
@@ -816,7 +839,11 @@ def main():
                 winning_candidate,
                 filename=winning_candidate.metadata.get("title", "video"),
                 requested_quality=requested_quality,
+                conflict_policy=conflict_policy,
             )
+
+            if output is None:
+                return 0
 
             write_history({
                 "url": url,
@@ -827,7 +854,9 @@ def main():
                 "race_duration_ms": race_result.duration_ms,
             })
 
-            if not no_open:
+            auto_open_cfg = config.get("auto_open", True)
+            should_open = auto_open_flag if auto_open_flag is not None else (auto_open_cfg and not no_open)
+            if should_open:
                 open_downloaded_video(output)
 
             return 0

@@ -135,7 +135,8 @@ def choose_format(
 
 def download(
     url,
-    requested_quality=None
+    requested_quality=None,
+    output_path=None
 ):
 
     if not available():
@@ -238,10 +239,13 @@ def download(
             "bv*+ba/b"
         )
 
-    output_template = str(
-        download_dir
-        / "%(title)s.%(ext)s"
-    )
+    if output_path:
+        output_template = str(output_path)
+    else:
+        output_template = str(
+            download_dir
+            / "%(title)s.%(ext)s"
+        )
 
     command = [
         "yt-dlp",

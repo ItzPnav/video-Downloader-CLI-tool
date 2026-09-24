@@ -2,8 +2,19 @@ import json
 import re
 from urllib.parse import urljoin
 
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    requests = None
+    REQUESTS_AVAILABLE = False
+
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BeautifulSoup = None
+    BS4_AVAILABLE = False
 
 from .candidate import (
     Candidate,

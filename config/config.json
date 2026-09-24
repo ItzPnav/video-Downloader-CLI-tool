@@ -1,19 +1,20 @@
 {
-    "version": "0.2.0",
-    "download_directory": "downloaded-video",
-    "preferred_format": "bv*+ba/b",
-    "merge_format": "mp4",
-    "browser_wait_seconds": 8,
-    "use_ytdlp": true,
-    "use_static_scanner": true,
-    "use_browser": true,
-    "use_scrapling": true,
-    "race_timeout": 20,
-    "confidence_threshold": 50,
-    "spawn_terminals": false,
-    "browser_grace_seconds": 2.5,
-    "github": {
-        "repository": "",
-        "branch": "main"
-    }
+  "version": "0.2.0",
+  "download_directory": "C:\\pnav\\extra\\others\\video\\best bjs",
+  "preferred_format": "bv*+ba/b",
+  "merge_format": "mp4",
+  "browser_wait_seconds": 8,
+  "use_ytdlp": true,
+  "use_static_scanner": true,
+  "use_browser": true,
+  "use_scrapling": true,
+  "race_timeout": 20,
+  "confidence_threshold": 50,
+  "spawn_terminals": false,
+  "browser_grace_seconds": 2.5,
+  "auto_open": false,
+  "github": {
+    "repository": "",
+    "branch": "main"
+  }
 }

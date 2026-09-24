@@ -21,12 +21,15 @@ DEFAULT_CONFIG = {
     "use_scrapling": True,
     "race_timeout": 20,
     "confidence_threshold": 50,
-    "spawn_terminals": True,
+    "spawn_terminals": False,
+    "browser_grace_seconds": 2.5,
+    "auto_open": True,
     "github": {
         "repository": "ItzPnav/video-Downloader-CLI-tool",
         "branch": "main"
     }
 }
+
 
 
 def get_config_dir() -> Path:
@@ -79,6 +82,21 @@ def load_config() -> dict:
         return merged
     except Exception:
         return DEFAULT_CONFIG.copy()
+
+
+def save_config(config_data: dict) -> bool:
+    """Save configuration dictionary to config.json."""
+    config_dir = get_config_dir()
+    config_path = config_dir / "config.json"
+    try:
+        config_path.write_text(
+            json.dumps(config_data, indent=2, ensure_ascii=False),
+            encoding="utf-8"
+        )
+        return True
+    except Exception as error:
+        print(f"[!] Warning: Could not write configuration: {error}", file=sys.stderr)
+        return False
 
 
 def get_download_dir() -> Path:

@@ -39,6 +39,8 @@ src/video_downloader/browser_scanner.py  ← Selenium + Headless Chromium networ
 src/video_downloader/candidate.py        ← Media candidate model and scoring logic
 src/video_downloader/selector.py         ← Candidate ranking algorithm
 src/video_downloader/downloader.py       ← FFmpeg stream copying and download executor
+src/video_downloader/conflict_resolver.py← File collision detection and diff comparison
+src/video_downloader/menu.py             ← Interactive terminal menu and arrow navigation
 src/video_downloader/progress.py         ← Terminal spinner and progress bar renderer
 src/video_downloader/utils.py            ← Configuration loading, filename sanitization, history logger
 README.md                                ← Always regenerate using README BUILDER rules in Section 7.
@@ -66,7 +68,8 @@ Configuration lives in `config/config.json`:
   "race_timeout": 20,
   "confidence_threshold": 50,
   "spawn_terminals": false,
-  "browser_grace_seconds": 2.5
+  "browser_grace_seconds": 2.5,
+  "auto_open": true
 }
 ```
 
