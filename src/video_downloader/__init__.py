@@ -28,6 +28,18 @@ _LAZY_EXPORTS = {
     "run_interactive_menu": ".menu",
     "resolve_file_conflict": ".conflict_resolver",
     "generate_unique_path": ".conflict_resolver",
+    "convert_video_to_gif": ".converter",
+    "convert_video_to_audio": ".converter",
+    "convert_audio_to_audio": ".converter",
+    "convert_gif_to_mp4": ".converter",
+    "convert_image": ".converter",
+    "convert_text_to_pdf": ".converter",
+    "scrape_and_download_comic": ".comic_scraper",
+    "images_to_pdf": ".packager",
+    "images_to_cbz": ".packager",
+    "run_ocr": ".ocr",
+    "extract_text_from_image": ".ocr",
+    "launch_web_previewer": ".previewer",
 }
 
 __all__ = [
@@ -52,6 +64,18 @@ __all__ = [
     "run_interactive_menu",
     "resolve_file_conflict",
     "generate_unique_path",
+    "convert_video_to_gif",
+    "convert_video_to_audio",
+    "convert_audio_to_audio",
+    "convert_gif_to_mp4",
+    "convert_image",
+    "convert_text_to_pdf",
+    "scrape_and_download_comic",
+    "images_to_pdf",
+    "images_to_cbz",
+    "run_ocr",
+    "extract_text_from_image",
+    "launch_web_previewer",
 ]
 
 

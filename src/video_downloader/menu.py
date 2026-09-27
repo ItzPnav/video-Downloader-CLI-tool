@@ -874,6 +874,357 @@ def action_settings(config: dict):
             break
 
 
+def action_convert(config: dict):
+    """Action: Interactive Media Converter Sub-Menu."""
+    from .converter import (
+        convert_video_to_gif,
+        convert_video_to_audio,
+        convert_audio_to_audio,
+        convert_gif_to_mp4,
+        convert_image,
+        convert_text_to_pdf,
+        remux_or_transcode_video,
+    )
+
+    conv_options = [
+        ("Video → Animated GIF (High Quality 2-Pass)", "Create smooth GIF with palette optimization"),
+        ("Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
+        ("Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
+        ("Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
+        ("Animated GIF → MP4 Video", "Convert GIF animation into lightweight MP4"),
+        ("Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
+        ("Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
+        ("← Back to Main Menu", "Return to main dashboard"),
+    ]
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🔄  MEDIA CONVERTER{RESET}        {DIM}FFmpeg & Pillow zero-bloat engine{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (label, desc) in enumerate(conv_options):
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {idx+1:>2} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{idx+1:>2}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(conv_options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(conv_options)
+        elif key in ("ENTER", "1", "2", "3", "4", "5", "6", "7", "8"):
+            choice_num = (int(key) - 1) if key in "12345678" else selected_idx
+            if choice_num == 7:  # Back
+                break
+
+            clear_screen()
+            show_cursor()
+
+            print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}\n")
+            videos = get_video_files()
+            if videos and choice_num in (0, 1, 2, 6):
+                print(f"{BOLD}Recent files in download directory:{RESET}")
+                for i, v in enumerate(videos[:5], 1):
+                    print(f"  {FG_CYAN}[{i}]{RESET} {v.name}")
+                print()
+
+            raw_input = input(f"{BOLD}Enter file path (or number 1-{min(5, len(videos))}):{RESET} ").strip()
+            if not raw_input or raw_input == "0":
+                hide_cursor()
+                continue
+
+            input_path = None
+            if raw_input.isdigit() and 1 <= int(raw_input) <= len(videos):
+                input_path = videos[int(raw_input) - 1]
+            else:
+                cleaned = raw_input.strip('"\'')
+                input_path = Path(cleaned)
+
+            if not input_path.is_file():
+                print(f"\n{FG_RED}[-] File not found: {input_path}{RESET}")
+                pause_prompt()
+                hide_cursor()
+                continue
+
+            def _progress(pct: int, msg: str):
+                print(f"  [{pct:>3}%] {msg}")
+
+            try:
+                if choice_num == 0:  # Video -> GIF
+                    print(f"\n{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
+                    fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
+                    res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
+                    qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
+
+                    fps = int(fps_in) if fps_in.isdigit() else 30
+                    height = int(res_in) if res_in.isdigit() else 504
+                    colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
+
+                    out_gif = input_path.parent / f"{input_path.stem}.gif"
+                    print(f"\n[+] Converting to GIF: {out_gif.name}...")
+                    convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
+
+                elif choice_num == 1:  # Video -> MP3
+                    out_mp3 = input_path.parent / f"{input_path.stem}.mp3"
+                    print(f"\n[+] Extracting MP3 audio...")
+                    convert_video_to_audio(input_path, out_mp3, audio_format="mp3", bitrate="320k", progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_mp3}{RESET}")
+
+                elif choice_num == 2:  # Audio ↔ Audio
+                    fmt = input("  Target audio format (mp3/aac/wav/flac/ogg/m4a/opus, default mp3): ").strip().lower() or "mp3"
+                    out_aud = input_path.parent / f"{input_path.stem}.{fmt}"
+                    print(f"\n[+] Converting audio to {fmt.upper()}...")
+                    convert_audio_to_audio(input_path, out_aud, audio_format=fmt, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_aud}{RESET}")
+
+                elif choice_num == 3:  # Text -> PDF
+                    out_pdf = input_path.parent / f"{input_path.stem}.pdf"
+                    print(f"\n[+] Rendering Text Document to PDF...")
+                    convert_text_to_pdf(input_path, out_pdf, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_pdf}{RESET}")
+
+                elif choice_num == 4:  # GIF -> MP4
+                    out_mp4 = input_path.parent / f"{input_path.stem}.mp4"
+                    print(f"\n[+] Converting GIF to MP4...")
+                    convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
+
+                elif choice_num == 5:  # Image Format
+                    fmt = input("  Target format (png/jpg/webp/bmp/tiff, default png): ").strip().lower() or "png"
+                    out_img = input_path.parent / f"{input_path.stem}.{fmt}"
+                    print(f"\n[+] Converting image...")
+                    convert_image(input_path, out_img, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_img}{RESET}")
+
+                elif choice_num == 6:  # Remux / Transcode
+                    reencode_in = input("  Re-encode stream? [y/N, default N = fast remux]: ").strip().lower()
+                    reencode = reencode_in in ("y", "yes")
+                    out_vid = input_path.parent / f"{input_path.stem}_remux.mp4"
+                    print(f"\n[+] Processing video...")
+                    remux_or_transcode_video(input_path, out_vid, reencode=reencode, progress_callback=_progress)
+                    print(f"\n{FG_GREEN}[✓] Saved: {out_vid}{RESET}")
+
+            except Exception as e:
+                print(f"\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+
+            pause_prompt()
+            hide_cursor()
+
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def action_comic_scraper(config: dict):
+    """Action: Comic & Image Gallery Scraper."""
+    from .comic_scraper import scrape_and_download_comic
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"               {BOLD}COMIC & IMAGE GALLERY SCRAPER{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+
+    print(f"{DIM}Enter a comic / gallery URL, local HTML file path, or image folder.{RESET}")
+    print(f"{DIM}Type 0 or press Enter on empty input to cancel.{RESET}\n")
+
+    try:
+        source = input(f"{BOLD}{FG_CYAN}Source (URL, HTML path, or folder):{RESET} ").strip().strip('"\'')
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    if not source or source == "0":
+        return
+
+    print(f"\n{BOLD}Select Packaging Option:{RESET}")
+    print(f"  {FG_CYAN}[1]{RESET} Download Images to Folder Only")
+    print(f"  {FG_CYAN}[2]{RESET} Auto-bundle into Multi-Page PDF")
+    print(f"  {FG_CYAN}[3]{RESET} Auto-bundle into Comic Book Zip (.cbz)")
+
+    opt = input(f"\n{BOLD}Choice [1-3, default 1]:{RESET} ").strip()
+    auto_format = "pdf" if opt == "2" else ("cbz" if opt == "3" else None)
+
+    cookie_in = input(f"\n{BOLD}Cookie file (.txt) [optional, press Enter to skip]:{RESET} ").strip().strip('"\'')
+    cookie_file = Path(cookie_in) if cookie_in else None
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        print(f"\n{BOLD}[+] Starting extraction...{RESET}")
+        res = scrape_and_download_comic(
+            source=source,
+            auto_format=auto_format,
+            cookie_file=cookie_file,
+            progress_callback=_progress,
+        )
+        print(f"\n{FG_GREEN}[✓] Extraction finished successfully!{RESET}")
+        print(f"    Saved to: {res}")
+    except Exception as e:
+        print(f"\n{FG_RED}[-] Scraping failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+def action_pack_images(config: dict):
+    """Action: Image Folder to PDF / CBZ Packager."""
+    from .packager import images_to_pdf, images_to_cbz, batch_pack_folders
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"                 {BOLD}IMAGES TO PDF / CBZ PACKAGER{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+
+    print(f"{DIM}Select a folder containing images to pack into a single PDF or CBZ.{RESET}\n")
+
+    try:
+        folder_str = input(f"{BOLD}{FG_CYAN}Enter Folder Path:{RESET} ").strip().strip('"\'')
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    if not folder_str or folder_str == "0":
+        return
+
+    folder = Path(folder_str)
+    if not folder.is_dir():
+        print(f"\n{FG_RED}[-] Directory not found: {folder}{RESET}")
+        pause_prompt()
+        return
+
+    print(f"\n{BOLD}Select Output Format:{RESET}")
+    print(f"  {FG_CYAN}[1]{RESET} Multi-Page PDF (.pdf)")
+    print(f"  {FG_CYAN}[2]{RESET} Comic Book Zip (.cbz)")
+
+    fmt_choice = input(f"\n{BOLD}Choice [1-2, default 1]:{RESET} ").strip()
+    target_fmt = "cbz" if fmt_choice == "2" else "pdf"
+
+    recurse_in = input(f"{BOLD}Recurse into nested subfolders? [y/N]:{RESET} ").strip().lower()
+    recurse = recurse_in in ("y", "yes")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        out_dir = folder.parent
+        if recurse:
+            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
+            print(f"\n{FG_GREEN}[✓] Batch complete! Created {len(created)} {target_fmt.upper()} archives in:{RESET}")
+            print(f"    {out_dir}")
+        else:
+            out_file = out_dir / f"{folder.name}.{target_fmt}"
+            if target_fmt == "cbz":
+                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
+            else:
+                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
+
+            if ok:
+                print(f"\n{FG_GREEN}[✓] Successfully created {target_fmt.upper()} ({count} pages):{RESET}")
+                print(f"    {out_file}")
+            else:
+                print(f"\n{FG_YELLOW}[!] No supported images found in: {folder}{RESET}")
+    except Exception as e:
+        print(f"\n{FG_RED}[-] Packaging failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+def action_ocr(config: dict):
+    """Action: OCR Image to Text Extraction."""
+    from .ocr import run_ocr, is_tesseract_available, get_tesseract_install_hint
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"                 {BOLD}OCR — IMAGE TO TEXT EXTRACTOR{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+
+    if not is_tesseract_available():
+        print(f"{FG_YELLOW}[!] {get_tesseract_install_hint()}{RESET}\n")
+        pause_prompt()
+        return
+
+    print(f"{DIM}Enter an image file path, folder path, or multiple image paths.{RESET}\n")
+
+    try:
+        target_str = input(f"{BOLD}{FG_CYAN}Image or Folder Path:{RESET} ").strip().strip('"\'')
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    if not target_str or target_str == "0":
+        return
+
+    target_path = Path(target_str)
+    if not target_path.exists():
+        print(f"\n{FG_RED}[-] Path not found: {target_path}{RESET}")
+        pause_prompt()
+        return
+
+    lang_in = input(f"{BOLD}Tesseract Language Code [default: eng]:{RESET} ").strip() or "eng"
+    combine_in = input(f"{BOLD}Combine into single .txt file? [Y/n]:{RESET} ").strip().lower()
+    combine = combine_in not in ("n", "no")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        print(f"\n{BOLD}[+] Running OCR engine...{RESET}")
+        ok, out_path, preview = run_ocr(
+            target=target_path,
+            lang=lang_in,
+            combine_output=combine,
+            progress_callback=_progress,
+        )
+        print(f"\n{FG_GREEN}[✓] OCR Extraction Successful!{RESET}")
+        print(f"    Output: {out_path}\n")
+        if preview:
+            print("--- Extracted Text Preview ---")
+            print(preview[:500] + ("\n..." if len(preview) > 500 else ""))
+            print("------------------------------")
+    except Exception as e:
+        print(f"\n{FG_RED}[-] OCR failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+def action_preview(config: dict):
+    """Action: Launch Web Stream Previewer."""
+    from .previewer import launch_web_previewer
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"                 {BOLD}WEB MEDIA & STREAM PREVIEWER{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+
+    print(f"{DIM}Enter a video URL to pre-load, or press Enter to open player.{RESET}\n")
+
+    try:
+        url = input(f"{BOLD}{FG_CYAN}Video / Stream URL [optional]:{RESET} ").strip()
+    except (KeyboardInterrupt, EOFError):
+        return
+
+    print(f"\n[+] Opening Stream Previewer in browser...")
+    launch_web_previewer(url if url else None)
+    time.sleep(1.0)
+
+
 # ============================================================================
 # MAIN MENU LOOP
 # ============================================================================
@@ -887,6 +1238,11 @@ def run_interactive_menu() -> int:
 
     options = [
         ("📥", "Download Video", "Extract and download stream from any URL"),
+        ("🔄", "Convert Media", "Video to GIF, Audio, Text to PDF, Images"),
+        ("📚", "Comic / Image Scraper", "Scrape & download comic/manga chapters & galleries"),
+        ("📦", "Images to PDF / CBZ", "Bundle image folders into multi-page PDF or CBZ"),
+        ("🔍", "OCR (Image to Text)", "Extract text from images using Tesseract OCR"),
+        ("🌐", "Web Stream Previewer", "Instant browser media player & stream previewer"),
         ("▶", "Open / Play Video", "Browse and launch downloaded videos"),
         ("🗑", "Clear Selected Videos", "Interactive multi-select deletion checklist"),
         ("💥", "Clear All Videos", "Wipe all downloaded video files from folder"),
@@ -937,38 +1293,55 @@ def run_interactive_menu() -> int:
                     time.sleep(1.2)
             elif key == "IGNORE":
                 pass
-            elif key in ("1", "2", "3", "4", "5", "6", "7"):
+            elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
                 num = int(key) - 1
-                selected_index = num
-                # Execute immediately on number press
-                if num == 0:
-                    action_download(config)
-                elif num == 1:
-                    action_open(config)
-                elif num == 2:
-                    action_clear_selected(config)
-                elif num == 3:
-                    action_clear_all(config)
-                elif num == 4:
-                    action_change_directory(config)
-                elif num == 5:
-                    action_settings(config)
-                elif num == 6:
-                    break
+                if num < len(options):
+                    selected_index = num
+                    if num == 0:
+                        action_download(config)
+                    elif num == 1:
+                        action_convert(config)
+                    elif num == 2:
+                        action_comic_scraper(config)
+                    elif num == 3:
+                        action_pack_images(config)
+                    elif num == 4:
+                        action_ocr(config)
+                    elif num == 5:
+                        action_preview(config)
+                    elif num == 6:
+                        action_open(config)
+                    elif num == 7:
+                        action_clear_selected(config)
+                    elif num == 8:
+                        action_clear_all(config)
+            elif key == "0":
+                selected_index = len(options) - 1
+                break
             elif key == "ENTER":
                 if selected_index == 0:
                     action_download(config)
                 elif selected_index == 1:
-                    action_open(config)
+                    action_convert(config)
                 elif selected_index == 2:
-                    action_clear_selected(config)
+                    action_comic_scraper(config)
                 elif selected_index == 3:
-                    action_clear_all(config)
+                    action_pack_images(config)
                 elif selected_index == 4:
-                    action_change_directory(config)
+                    action_ocr(config)
                 elif selected_index == 5:
-                    action_settings(config)
+                    action_preview(config)
                 elif selected_index == 6:
+                    action_open(config)
+                elif selected_index == 7:
+                    action_clear_selected(config)
+                elif selected_index == 8:
+                    action_clear_all(config)
+                elif selected_index == 9:
+                    action_change_directory(config)
+                elif selected_index == 10:
+                    action_settings(config)
+                elif selected_index == 11:
                     break
             elif key in ("q", "Q", "ESC"):
                 break
@@ -981,3 +1354,4 @@ def run_interactive_menu() -> int:
         print(f"{FG_CYAN}Thank you for using Video Extractor!{RESET}\n")
 
     return 0
+

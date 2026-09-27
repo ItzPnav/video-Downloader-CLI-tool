@@ -404,27 +404,57 @@ def show_help():
     print()
     print("Usage:")
     print('  video "URL" [options]')
+    print('  video convert <input> --to <format> [options]')
+    print('  video comic <url_or_file> [options]')
+    print('  video pack <folder> --to <pdf|cbz> [options]')
+    print('  video ocr <image_or_folder> [options]')
+    print('  video preview [url_or_file]')
     print()
     print("Commands:")
-    print("  video                    Interactive terminal navigation menu (or help in pipe)")
+    print("  video                    Interactive terminal navigation menu")
     print('  video "URL"              Extract and download media')
-    print("  video --menu             Open interactive terminal menu")
-    print("  video --help             Show help")
-    print("  video --version          Show version")
-    print("  video --history          Show download history")
-    print("  video --update           Update extractor")
-    print("  video --clean            Delete downloaded videos")
-    print("  video --open             Choose and play a video")
+    print("  video convert <file>     Convert media (video->gif, audio, images, text->pdf)")
+    print("  video comic <url/file>   Scrape & download comic/image gallery chapters")
+    print("  video pack <folder>      Bundle image folders into multi-page PDF or CBZ")
+    print("  video ocr <img/folder>   Extract text from images using Tesseract OCR")
+    print("  video preview [url/file] Launch instant browser media player / stream previewer")
+    print("  --menu                   Open interactive terminal menu")
+    print("  --help                   Show help")
+    print("  --version                Show version")
+    print("  --history                Show download history")
+    print("  --update                 Update extractor")
+    print("  --clean                  Delete downloaded videos")
+    print("  --open                   Choose and play a video")
     print()
-    print("Options:")
+    print("Conversion Options (video convert):")
+    print("  --to <format>            Target format (gif, mp3, mp4, wav, flac, aac, png, jpg, pdf)")
+    print("  --fps 30                 Frames per second for GIF (default: 30)")
+    print("  --res 504p|480p|360p     Height resolution for GIF (default: 504p)")
+    print("  --quality high|med|low   Color palette quality for GIF (default: high)")
+    print("  --out <path>             Custom output path or directory")
+    print()
+    print("Comic / Packaging Options:")
+    print("  --pdf                    Auto-bundle into PDF")
+    print("  --cbz                    Auto-bundle into Comic Book Zip (CBZ)")
+    print("  --cookies <file.txt>     Supply Netscape cookies.txt for login/age-gates")
+    print("  --respect-robots         Check and respect site robots.txt policy")
+    print("  --recurse                Recursively process nested subfolders (for pack)")
+    print("  --out <path>             Custom output directory")
+    print()
+    print("OCR Options (video ocr):")
+    print("  --lang <code>            Tesseract language code (e.g. eng, jpn, deu; default: eng)")
+    print("  --separate               Write individual .txt file per image instead of single combined")
+    print("  --out <dir>              Custom output directory")
+    print()
+    print("Extraction Options:")
     print("  --quality 1080p          Request video quality (e.g. 720p, 1080p)")
     print("  --race-timeout 20        Multi-agent tier race timeout in seconds (default: 20)")
     print("  --browser-grace 2.5      Grace period before spawning heavy browser tier (default: 2.5s)")
     print("  --confidence 50          Minimum candidate score threshold to win (default: 50)")
     print("  --auto-open              Automatically open video after download")
     print("  --no-open                Don't open video after download")
-    print("  --spawn-terminals        Spawn separate GUI terminal windows per tier (default: single terminal)")
-    print("  --no-terminals           Run race headlessly inside current terminal (default)")
+    print("  --spawn-terminals        Spawn separate GUI terminal windows per tier")
+    print("  --no-terminals           Run race headlessly inside current terminal")
     print("  --no-ytdlp               Exclude yt-dlp agent from race")
     print("  --no-static              Exclude static scanner agent from race")
     print("  --no-browser             Exclude headless Chromium agent from race")
@@ -438,6 +468,305 @@ def show_help():
     print()
     print("=" * 60)
     print()
+
+
+def run_cli_convert(args: list) -> int:
+    """Execute media conversion command from CLI arguments."""
+    from .converter import (
+        convert_video_to_gif,
+        convert_video_to_audio,
+        convert_audio_to_audio,
+        convert_gif_to_mp4,
+        convert_image,
+        convert_text_to_pdf,
+        remux_or_transcode_video,
+    )
+    from .utils import get_download_dir
+
+    if not args:
+        print("[-] Usage: video convert <input_file> --to <format> [options]")
+        return 1
+
+    input_file = Path(args[0]).resolve()
+    if not input_file.is_file():
+        print(f"[-] Input file not found: {input_file}")
+        return 1
+
+    target_fmt = None
+    fps = 30
+    height = 504
+    colors = 256
+    custom_out = None
+
+    idx = 1
+    while idx < len(args):
+        a = args[idx]
+        if a == "--to" and idx + 1 < len(args):
+            target_fmt = args[idx + 1].lower().lstrip(".")
+            idx += 1
+        elif a.startswith("--to="):
+            target_fmt = a.split("=", 1)[1].lower().lstrip(".")
+        elif a == "--fps" and idx + 1 < len(args):
+            try:
+                fps = int(args[idx + 1])
+            except ValueError:
+                pass
+            idx += 1
+        elif a == "--res" and idx + 1 < len(args):
+            r_str = args[idx + 1].lower().replace("p", "")
+            try:
+                height = int(r_str)
+            except ValueError:
+                pass
+            idx += 1
+        elif a == "--quality" and idx + 1 < len(args):
+            q_str = args[idx + 1].lower()
+            colors = 256 if "high" in q_str else (128 if "med" in q_str else 64)
+            idx += 1
+        elif a == "--out" and idx + 1 < len(args):
+            custom_out = Path(args[idx + 1])
+            idx += 1
+        idx += 1
+
+    if not target_fmt:
+        print("[-] Target format required: specify --to <gif|mp3|mp4|wav|png|jpg|pdf|etc.>")
+        return 1
+
+    # Determine default destination
+    if custom_out:
+        if custom_out.is_dir():
+            out_path = custom_out / f"{input_file.stem}.{target_fmt}"
+        else:
+            out_path = custom_out
+    else:
+        out_path = input_file.parent / f"{input_file.stem}.{target_fmt}"
+
+    print(f"\n[+] Input  : {input_file.name}")
+    print(f"[+] Target : {target_fmt.upper()}")
+    print(f"[+] Output : {out_path}")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        in_suffix = input_file.suffix.lower()
+        if target_fmt == "gif":
+            convert_video_to_gif(input_file, out_path, fps=fps, height=height, colors=colors, progress_callback=_progress)
+        elif target_fmt == "pdf" and in_suffix in (".txt", ".md", ".csv", ".json", ".log", ".py", ".html", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".sh", ".bat", ".rst"):
+            convert_text_to_pdf(input_file, out_path, progress_callback=_progress)
+        elif target_fmt in ("mp3", "aac", "wav", "flac", "ogg", "m4a", "opus"):
+            if in_suffix in (".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus", ".wma"):
+                convert_audio_to_audio(input_file, out_path, audio_format=target_fmt, progress_callback=_progress)
+            else:
+                convert_video_to_audio(input_file, out_path, audio_format=target_fmt, progress_callback=_progress)
+        elif in_suffix == ".gif" and target_fmt == "mp4":
+            convert_gif_to_mp4(input_file, out_path, progress_callback=_progress)
+        elif target_fmt in ("png", "jpg", "jpeg", "webp", "bmp", "tiff"):
+            convert_image(input_file, out_path, progress_callback=_progress)
+        elif target_fmt == "mp4":
+            remux_or_transcode_video(input_file, out_path, progress_callback=_progress)
+        else:
+            print(f"[-] Unsupported conversion: {in_suffix} -> {target_fmt}")
+            return 1
+
+        print(f"\n[✓] Conversion successful: {out_path}\n")
+        return 0
+    except Exception as e:
+        print(f"\n[-] Conversion failed: {e}\n")
+        return 1
+
+
+def run_cli_comic(args: list) -> int:
+    """Execute comic/gallery scraper from CLI arguments."""
+    from .comic_scraper import scrape_and_download_comic
+    from .utils import get_download_dir
+
+    if not args:
+        print("[-] Usage: video comic <url_or_html_file> [--pdf] [--cbz] [--cookies <cookies.txt>] [--out <dir>]")
+        return 1
+
+    source = args[0]
+    auto_format = None
+    custom_out = None
+    cookie_file = None
+    respect_robots = False
+
+    idx = 1
+    while idx < len(args):
+        a = args[idx]
+        if a == "--pdf":
+            auto_format = "pdf"
+        elif a == "--cbz":
+            auto_format = "cbz"
+        elif a in ("--cookies", "--cookie-file") and idx + 1 < len(args):
+            cookie_file = Path(args[idx + 1])
+            idx += 1
+        elif a == "--respect-robots":
+            respect_robots = True
+        elif a == "--out" and idx + 1 < len(args):
+            custom_out = Path(args[idx + 1])
+            idx += 1
+        idx += 1
+
+    print(f"\n[+] Comic / Gallery Source: {source}")
+    if auto_format:
+        print(f"[+] Auto-pack Target: {auto_format.upper()}")
+    if cookie_file:
+        print(f"[+] Cookie File: {cookie_file}")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        result_path = scrape_and_download_comic(
+            source=source,
+            output_base_dir=custom_out,
+            auto_format=auto_format,
+            cookie_file=cookie_file,
+            respect_robots=respect_robots,
+            progress_callback=_progress,
+        )
+        print(f"\n[✓] Scraping complete! Output: {result_path}\n")
+        return 0
+    except Exception as e:
+        print(f"\n[-] Comic extraction failed: {e}\n")
+        return 1
+
+
+def run_cli_ocr(args: list) -> int:
+    """Execute OCR image-to-text extraction from CLI arguments."""
+    from .ocr import run_ocr
+
+    if not args:
+        print("[-] Usage: video ocr <image_or_folder> [--lang <code, default: eng>] [--separate] [--out <dir>]")
+        return 1
+
+    target = args[0]
+    lang = "eng"
+    combine_output = True
+    custom_out = None
+
+    idx = 1
+    while idx < len(args):
+        a = args[idx]
+        if a == "--lang" and idx + 1 < len(args):
+            lang = args[idx + 1]
+            idx += 1
+        elif a.startswith("--lang="):
+            lang = a.split("=", 1)[1]
+        elif a in ("--separate", "--no-combine"):
+            combine_output = False
+        elif a == "--out" and idx + 1 < len(args):
+            custom_out = Path(args[idx + 1])
+            idx += 1
+        idx += 1
+
+    print(f"\n[+] OCR Target: {target}")
+    print(f"[+] Language  : {lang}")
+    print(f"[+] Combined  : {combine_output}")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        ok, out_path, preview = run_ocr(
+            target=target,
+            output_dir=custom_out,
+            lang=lang,
+            combine_output=combine_output,
+            progress_callback=_progress,
+        )
+        print(f"\n[✓] OCR finished successfully! Saved to: {out_path}\n")
+        if preview:
+            print("--- Extracted Text Preview ---")
+            print(preview[:400] + ("\n..." if len(preview) > 400 else ""))
+            print("------------------------------\n")
+        return 0
+    except Exception as e:
+        print(f"\n[-] OCR extraction failed: {e}\n")
+        return 1
+
+
+def run_cli_preview(args: list) -> int:
+    """Launch instant web browser media player / stream previewer."""
+    from .previewer import launch_web_previewer
+
+    target_url = args[0] if args else None
+    print(f"\n[+] Launching Video Extractor Web Previewer...")
+    if target_url:
+        print(f"[+] Target Stream / Video: {target_url}")
+
+    ok = launch_web_previewer(target_url)
+    if ok:
+        print(f"[✓] Previewer launched in browser.\n")
+        return 0
+    else:
+        print(f"[-] Could not open web browser previewer.\n")
+        return 1
+
+
+def run_cli_pack(args: list) -> int:
+    """Execute image folder packaging into PDF or CBZ from CLI arguments."""
+    from .packager import images_to_pdf, images_to_cbz, batch_pack_folders
+    from .utils import get_download_dir
+
+    if not args:
+        print("[-] Usage: video pack <folder> --to <pdf|cbz> [--recurse] [--out <dir>]")
+        return 1
+
+    folder = Path(args[0]).resolve()
+    if not folder.is_dir():
+        print(f"[-] Folder not found: {folder}")
+        return 1
+
+    target_fmt = "pdf"
+    recurse = False
+    custom_out = None
+
+    idx = 1
+    while idx < len(args):
+        a = args[idx]
+        if a == "--to" and idx + 1 < len(args):
+            target_fmt = args[idx + 1].lower().lstrip(".")
+            idx += 1
+        elif a == "--recurse":
+            recurse = True
+        elif a == "--out" and idx + 1 < len(args):
+            custom_out = Path(args[idx + 1])
+            idx += 1
+        idx += 1
+
+    print(f"\n[+] Packaging Folder: {folder}")
+    print(f"[+] Output Format   : {target_fmt.upper()}")
+    print(f"[+] Recursive Mode  : {recurse}")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        out_dir = custom_out or folder.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if recurse:
+            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
+            print(f"\n[✓] Pack complete! Created {len(created)} {target_fmt.upper()} files in: {out_dir}\n")
+        else:
+            out_file = out_dir / f"{folder.name}.{target_fmt}"
+            if target_fmt == "cbz":
+                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
+            else:
+                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
+
+            if ok:
+                print(f"\n[✓] Pack complete ({count} pages): {out_file}\n")
+            else:
+                print(f"[-] No valid images found to pack in: {folder}")
+                return 1
+
+        return 0
+    except Exception as e:
+        print(f"\n[-] Packaging failed: {e}\n")
+        return 1
 
 
 def show_version():
@@ -620,6 +949,56 @@ def main():
     ):
 
         return run_update()
+
+    # ========================================================
+    # CONVERT
+    # ========================================================
+
+    if args[0] in (
+        "--convert",
+        "convert"
+    ):
+        return run_cli_convert(args[1:])
+
+    # ========================================================
+    # COMIC / IMAGE GALLERY SCRAPER
+    # ========================================================
+
+    if args[0] in (
+        "--comic",
+        "comic"
+    ):
+        return run_cli_comic(args[1:])
+
+    # ========================================================
+    # PACK (IMAGES TO PDF / CBZ)
+    # ========================================================
+
+    if args[0] in (
+        "--pack",
+        "pack"
+    ):
+        return run_cli_pack(args[1:])
+
+    # ========================================================
+    # OCR (IMAGE TO TEXT)
+    # ========================================================
+
+    if args[0] in (
+        "--ocr",
+        "ocr"
+    ):
+        return run_cli_ocr(args[1:])
+
+    # ========================================================
+    # PREVIEW (WEB PREVIEWER)
+    # ========================================================
+
+    if args[0] in (
+        "--preview",
+        "preview"
+    ):
+        return run_cli_preview(args[1:])
 
     # ========================================================
     # PARSE OPTIONS

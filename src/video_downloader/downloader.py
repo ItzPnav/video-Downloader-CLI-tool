@@ -203,6 +203,22 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
 
     output = str(resolved_path)
 
+    # Check for direct video stream acceleration via parallel byte-ranges
+    url_lower = candidate.url.lower().split("?")[0]
+    is_direct_video = any(url_lower.endswith(ext) for ext in (".mp4", ".webm", ".mkv", ".mov", ".avi", ".ts"))
+
+    if is_direct_video:
+        try:
+            if download_parallel_stream(candidate.url, resolved_path):
+                print()
+                print("========================================")
+                print("[SUCCESS] Parallel download complete")
+                print("========================================")
+                print(output)
+                return output
+        except Exception as parallel_err:
+            print(f"[!] Parallel download fallback to FFmpeg: {parallel_err}")
+
     print()
     print("[+] Downloader (FFmpeg)")
     print(f"[+] Type : {candidate.label}")
@@ -233,4 +249,90 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
     print(output)
 
     return output
+
+
+def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeout: int = 20) -> bool:
+    """
+    Attempt high-speed parallel chunk download using HTTP Range bytes headers.
+    Returns True if successfully downloaded and assembled, False if server does not support ranges.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import requests
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+
+    try:
+        head_resp = requests.head(url, headers=headers, allow_redirects=True, timeout=timeout)
+        content_length = head_resp.headers.get("Content-Length")
+        accept_ranges = head_resp.headers.get("Accept-Ranges", "").lower()
+
+        if not content_length or not content_length.isdigit() or "bytes" not in accept_ranges:
+            return False
+
+        total_bytes = int(content_length)
+        # Only use parallel download if file is larger than 2MB
+        if total_bytes < 2 * 1024 * 1024:
+            return False
+
+        print(f"[+] Accelerated Parallel Downloader ({threads} threads, {total_bytes / (1024*1024):.1f} MB)")
+        part_size = total_bytes // threads
+        ranges = []
+        for i in range(threads):
+            start = i * part_size
+            end = (start + part_size - 1) if i < threads - 1 else total_bytes - 1
+            ranges.append((start, end))
+
+        temp_parts = []
+        dest_path = Path(dest_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        part_all = dest_path.with_suffix(dest_path.suffix + ".partall")
+
+        def _fetch_range(idx: int, start: int, end: int) -> Path:
+            part_file = dest_path.with_suffix(f"{dest_path.suffix}.part{idx}")
+            temp_parts.append(part_file)
+            req_h = dict(headers)
+            req_h["Range"] = f"bytes={start}-{end}"
+            with requests.get(url, headers=req_h, stream=True, timeout=timeout) as r:
+                r.raise_for_status()
+                with open(part_file, "wb") as pf:
+                    for chunk in r.iter_content(chunk_size=64 * 1024):
+                        if chunk:
+                            pf.write(chunk)
+            return part_file
+
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = {executor.submit(_fetch_range, i, s, e): i for i, (s, e) in enumerate(ranges)}
+            for fut in as_completed(futures):
+                fut.result()
+
+        # Combine parts into final file
+        with open(part_all, "wb") as out_f:
+            for i in range(threads):
+                p_file = dest_path.with_suffix(f"{dest_path.suffix}.part{i}")
+                with open(p_file, "rb") as in_f:
+                    shutil.copyfileobj(in_f, out_f)
+
+        if part_all.exists() and part_all.stat().st_size == total_bytes:
+            os.replace(part_all, dest_path)
+            for p_file in temp_parts:
+                try:
+                    p_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            return True
+
+    except Exception:
+        # Cleanup temporary files on failure
+        for p in dest_path.parent.glob(f"{dest_path.name}.part*"):
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return False
+
+    return False
+
 

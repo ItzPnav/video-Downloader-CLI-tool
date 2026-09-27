@@ -335,5 +335,93 @@
     "quality": "720p",
     "output": "/sdcard/Download/test.mp4",
     "race_duration_ms": 345
+  },
+  {
+    "url": "https://www.twpornstars.com/p/75277556",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (14).mp4",
+    "race_duration_ms": 3502
+  },
+  {
+    "url": "https://www.twpornstars.com/p/81539938",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (35).mp4",
+    "race_duration_ms": 5452
+  },
+  {
+    "url": "https://www.twpornstars.com/p/71833488",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (36).mp4",
+    "race_duration_ms": 5583
+  },
+  {
+    "url": "https://www.twpornstars.com/p/77761769",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (37).mp4",
+    "race_duration_ms": 4243
+  },
+  {
+    "url": "https://www.twpornstars.com/p/76843250",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (38).mp4",
+    "race_duration_ms": 5572
+  },
+  {
+    "url": "https://www.twpornstars.com/p/80580850",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (39).mp4",
+    "race_duration_ms": 3376
+  },
+  {
+    "url": "https://www.twpornstars.com/p/67579022",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (40).mp4",
+    "race_duration_ms": 3265
+  },
+  {
+    "url": "https://www.twpornstars.com/p/72305143",
+    "platform": "generic",
+    "engine": "static",
+    "quality": null,
+    "output": "C:\\pnav\\extra\\others\\video\\best bjs\\video (41).mp4",
+    "race_duration_ms": 3283
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
+  },
+  {
+    "url": "https://example.com/test-race-video",
+    "platform": "generic",
+    "engine": "scrapling",
+    "quality": "720p",
+    "output": "/sdcard/Download/test.mp4",
+    "race_duration_ms": 345
   }
 ]

@@ -29,6 +29,7 @@ dependencies = [
     "markdownify",
     "langgraph",
     "psutil",
+    "pillow",
 ]
 
 [project.scripts]
@@ -39,4 +40,4 @@ where = ["src"]
 include = ["video_downloader*"]
 
 [tool.setuptools.package-data]
-video_downloader = ["*.json", "routes/*.py", "extractors/*.py"]
+video_downloader = ["*.json", "routes/*.py", "extractors/*.py", "previewer/*", "previewer/css/*", "previewer/js/*"]
