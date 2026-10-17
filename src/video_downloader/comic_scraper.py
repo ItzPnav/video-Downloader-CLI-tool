@@ -26,7 +26,7 @@ try:
 except ImportError:
     CLOUDSCRAPER_AVAILABLE = False
 
-from .utils import safe_filename, get_download_dir
+from .utils import safe_filename, get_download_dir, get_tool_output_dir
 from .packager import images_to_pdf, images_to_cbz
 
 
@@ -228,7 +228,7 @@ def scrape_and_download_comic(
     Optionally bundles downloaded images into PDF or CBZ.
     """
     if not output_base_dir:
-        output_base_dir = Path(get_download_dir()) / "Comics"
+        output_base_dir = get_tool_output_dir("comic")
     else:
         output_base_dir = Path(output_base_dir)
 

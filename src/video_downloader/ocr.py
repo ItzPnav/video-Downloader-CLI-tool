@@ -23,7 +23,7 @@ try:
 except ImportError:
     PYTESSERACT_AVAILABLE = False
 
-from .utils import get_download_dir, safe_filename
+from .utils import get_download_dir, safe_filename, get_tool_output_dir
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"}
 
@@ -174,7 +174,7 @@ def run_ocr(
 
     # Determine output folder
     if not output_dir:
-        out_base = Path(get_download_dir()) / "OCR"
+        out_base = get_tool_output_dir("ocr")
     else:
         out_base = Path(output_dir).resolve()
     out_base.mkdir(parents=True, exist_ok=True)

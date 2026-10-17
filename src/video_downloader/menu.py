@@ -1,6 +1,6 @@
 """
-Interactive Terminal Menu & Navigation System for Video Extractor.
-Provides arrow-key driven workflows, clean ANSI interface, and full configuration control.
+Interactive Terminal Menu & Navigation System for Tool-Kit CLI.
+Provides arrow-key driven workflows, clean ANSI interface, interactive disk browser, and structured submenus.
 """
 
 import os
@@ -14,18 +14,23 @@ from .utils import (
     load_config,
     save_config,
     get_download_dir,
+    get_tool_output_dir,
+    set_tool_output_dir,
+    get_tool_default_dir,
+    auto_separate_all_tool_dirs,
+    reset_all_tool_dirs_to_defaults,
     get_version,
     write_history,
     safe_filename,
+    get_config_dir,
 )
-from .cli import system_open, valid_url
+from .cli import system_open, valid_url, show_history
 
 
 # ============================================================================
 # ANSI STYLING & TERMINAL SETUP
 # ============================================================================
 
-# Enable Virtual Terminal Processing on Windows
 if sys.platform == "win32":
     try:
         import ctypes
@@ -57,11 +62,23 @@ BG_CYAN = "\033[46m"
 BG_BLUE = "\033[44m"
 BG_GRAY = "\033[100m"
 
-# Common video file extensions
+# Common media file extensions
 VIDEO_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".m4v", ".mov", ".avi",
     ".3gp", ".3g2", ".flv", ".f4v", ".wmv", ".ogv",
     ".mpeg", ".mpg", ".ts", ".m2ts", ".mts"
+}
+
+IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"
+}
+
+AUDIO_EXTENSIONS = {
+    ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".wma"
+}
+
+DOCUMENT_EXTENSIONS = {
+    ".txt", ".md", ".csv", ".json", ".log", ".py", ".html", ".toml", ".yaml", ".yml", ".ini", ".cfg", ".sh", ".bat", ".rst"
 }
 
 
@@ -87,7 +104,7 @@ def show_cursor():
 
 
 # ============================================================================
-# ZERO-DEPENDENCY CROSS-PLATFORM KEYBOARD ENGINE
+# CROSS-PLATFORM KEYBOARD ENGINE & CLIPBOARD
 # ============================================================================
 
 def get_clipboard_text() -> str | None:
@@ -141,7 +158,6 @@ def get_clipboard_text() -> str | None:
         except Exception:
             pass
     else:
-        # Linux xclip / wl-paste fallback
         try:
             import subprocess
             for cmd in (["wl-paste"], ["xclip", "-selection", "clipboard", "-o"]):
@@ -156,9 +172,8 @@ def get_clipboard_text() -> str | None:
 def read_key() -> str:
     """
     Read a single keypress or escape sequence from terminal.
-    Safely captures Ctrl+V and rapid-fire pasted streams so menus don't flicker or misfire.
     Returns: 'UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'SPACE', 'ESC', 'BACKSPACE',
-             'CTRL_V', 'URL:<url>', 'IGNORE', or single char character like '1', 'q', etc.
+             'CTRL_V', 'URL:<url>', 'IGNORE', or single char character.
     """
     if sys.platform == "win32":
         import msvcrt
@@ -185,8 +200,6 @@ def read_key() -> str:
         if ch == b"\x03":
             raise KeyboardInterrupt
         if ch == b"\x16":
-            # Ctrl+V key combination detected
-            # Drain any trailing buffer characters sent by some terminal emulators
             extra_chars = []
             while msvcrt.kbhit():
                 try:
@@ -200,7 +213,6 @@ def read_key() -> str:
                 return f"URL:{extra_text}"
             return "CTRL_V"
 
-        # Check if this character is part of a rapid-fire paste stream from terminal
         if msvcrt.kbhit():
             buf = [ch]
             while msvcrt.kbhit():
@@ -261,7 +273,6 @@ def read_key() -> str:
             if ch == "\x16":
                 return "CTRL_V"
 
-            # Check if more characters are immediately available (terminal paste stream)
             r, _, _ = select.select([sys.stdin], [], [], 0.02)
             if r:
                 buf = [ch]
@@ -283,13 +294,162 @@ def read_key() -> str:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
-def pause_prompt(message: str = "Press any key to return to menu..."):
-    """Show prompt and wait for user keypress."""
+def pause_prompt(message: str = "Press any key to return..."):
+    """Show prompt and wait for user keypress (Esc/Enter/Any)."""
     print(f"\n{DIM}{message}{RESET}")
     try:
         read_key()
     except KeyboardInterrupt:
         pass
+
+
+# ============================================================================
+# INTERACTIVE DISK & FILE / FOLDER BROWSER
+# ============================================================================
+
+def browse_interactive_path(
+    mode: str = "file",
+    initial_dir: Path = None,
+    title: str = "Browse Files & Folders",
+    allowed_exts: set = None,
+) -> Path | None:
+    """
+    Interactive disk browser allowing user to navigate folders with arrow keys and pick files/folders.
+    mode: 'file' (pick file), 'folder' (pick directory), 'any' (pick either)
+    Returns: Path object selected, or None if cancelled with Esc / q / 0.
+    """
+    current_dir = (initial_dir or get_download_dir()).resolve()
+    if not current_dir.exists():
+        current_dir = Path.cwd()
+
+    cursor_idx = 0
+    hide_cursor()
+
+    while True:
+        try:
+            entries = []
+            # Option to go up
+            if current_dir.parent != current_dir:
+                entries.append(("..", current_dir.parent, True))
+
+            sub_dirs = []
+            sub_files = []
+
+            try:
+                for p in current_dir.iterdir():
+                    try:
+                        if p.is_dir() and not p.name.startswith("."):
+                            sub_dirs.append((p.name, p, True))
+                        elif p.is_file() and not p.name.startswith("."):
+                            if allowed_exts is None or p.suffix.lower() in allowed_exts:
+                                sub_files.append((p.name, p, False))
+                    except Exception:
+                        pass
+            except PermissionError:
+                pass
+
+            sub_dirs.sort(key=lambda x: x[0].lower())
+            sub_files.sort(key=lambda x: x[0].lower())
+            entries.extend(sub_dirs)
+            entries.extend(sub_files)
+
+        except Exception:
+            entries = []
+
+        if cursor_idx >= len(entries):
+            cursor_idx = max(0, len(entries) - 1)
+
+        clear_screen()
+        dir_disp = str(current_dir)
+        if len(dir_disp) > 52:
+            dir_disp = "..." + dir_disp[-49:]
+
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}📂  {title:<32}{RESET}  {DIM}Mode: {mode.upper()}{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}")
+        print(f" {DIM}Current:{RESET} {FG_YELLOW}{dir_disp}{RESET}\n")
+
+        if not entries:
+            print(f"  {DIM}(No items found in this directory){RESET}\n")
+        else:
+            max_visible = 10
+            start_idx = max(0, min(cursor_idx - max_visible // 2, len(entries) - max_visible))
+            end_idx = min(start_idx + max_visible, len(entries))
+
+            for idx in range(start_idx, end_idx):
+                name, path_obj, is_dir = entries[idx]
+                if is_dir:
+                    icon = f"{FG_YELLOW}📁{RESET}"
+                    label = f"{BOLD}{name}/{RESET}"
+                    info_str = f"{DIM}[DIR]{RESET}"
+                else:
+                    icon = f"{FG_CYAN}📄{RESET}"
+                    label = f"{name}"
+                    try:
+                        sz_mb = path_obj.stat().st_size / (1024 * 1024)
+                        info_str = f"{DIM}[{sz_mb:.1f} MB]{RESET}"
+                    except Exception:
+                        info_str = ""
+
+                if len(name) > 36:
+                    label = name[:33] + "..."
+
+                if idx == cursor_idx:
+                    prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                    num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {idx+1:>2} {RESET}"
+                    print(f"{prefix} {num_badge} {icon} {BOLD}{FG_CYAN}{label:<38}{RESET} {info_str}")
+                else:
+                    prefix = "   "
+                    num_badge = f"{DIM}[{idx+1:>2}]{RESET}"
+                    print(f"{prefix} {num_badge} {icon} {FG_WHITE}{label:<38}{RESET} {info_str}")
+
+            if len(entries) > max_visible:
+                print(f"\n{DIM}  (Showing {start_idx+1}-{end_idx} of {len(entries)} items — scroll with ↑/↓){RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        if mode == "folder":
+            print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Open  {DIM}•{RESET} {FG_YELLOW}[Space]{RESET} Select Current Folder  {DIM}•{RESET} {FG_BLUE}[p]{RESET} Type Path  {DIM}•{RESET} {FG_RED}[Esc]{RESET} Cancel")
+        else:
+            print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select/Open  {DIM}•{RESET} {FG_BLUE}[p]{RESET} Type Path  {DIM}•{RESET} {FG_RED}[Esc]{RESET} Cancel")
+
+        key = read_key()
+        if key == "UP":
+            if entries:
+                cursor_idx = (cursor_idx - 1) % len(entries)
+        elif key == "DOWN":
+            if entries:
+                cursor_idx = (cursor_idx + 1) % len(entries)
+        elif key == "SPACE" and mode == "folder":
+            return current_dir
+        elif key == "ENTER":
+            if not entries:
+                continue
+            name, path_obj, is_dir = entries[cursor_idx]
+            if is_dir:
+                current_dir = path_obj.resolve()
+                cursor_idx = 0
+            else:
+                if mode in ("file", "any"):
+                    return path_obj
+        elif key in ("p", "P", "/"):
+            clear_screen()
+            show_cursor()
+            print(f"\n{BOLD}{FG_CYAN}Manual Path Input:{RESET}")
+            print(f"{DIM}Enter full or relative path, or press Enter to cancel.{RESET}\n")
+            try:
+                manual = input("Path: ").strip().strip('"\'')
+                if manual:
+                    p = Path(os.path.expanduser(manual)).resolve()
+                    if p.exists():
+                        return p
+                    else:
+                        print(f"\n{FG_RED}[-] Path not found: {p}{RESET}")
+                        time.sleep(1.2)
+            except Exception:
+                pass
+            hide_cursor()
+        elif key in ("ESC", "q", "Q", "0"):
+            return None
 
 
 # ============================================================================
@@ -320,11 +480,11 @@ def render_banner(config: dict):
     fmt = config.get("merge_format", "mp4")
 
     print(f"{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
-    print(f"{FG_CYAN}│{RESET}  {BOLD}{FG_WHITE}▶  VIDEO EXTRACTOR{RESET} {DIM}v{version}{RESET}           {FG_CYAN}Multi-Agent Media CLI{RESET}  {FG_CYAN}│{RESET}")
+    print(f"{FG_CYAN}│{RESET}  {BOLD}{FG_WHITE}🛠  TOOL-KIT CLI{RESET} {DIM}v{version}{RESET}          {FG_CYAN}Multi-Agent Utility Suite{RESET}  {FG_CYAN}│{RESET}")
     print(f"{FG_CYAN}├─────────────────────────────────────────────────────────────┤{RESET}")
     print(f"{FG_CYAN}│{RESET}  {DIM}📁 Output:{RESET}  {FG_YELLOW}{download_dir:<46}{RESET} {FG_CYAN}│{RESET}")
     print(f"{FG_CYAN}│{RESET}  {DIM}⚡ Tiers:{RESET}   {engine_line:<66} {FG_CYAN}       │{RESET}")
-    print(f"{FG_CYAN}│{RESET}  {DIM}⏱ Race:{RESET}    {timeout}s max  {DIM}•{RESET} {DIM}Grace:{RESET} {grace}s {DIM}•{RESET}{DIM}Format:{RESET}{fmt:<16} {FG_CYAN}│{RESET}")
+    print(f"{FG_CYAN}│{RESET}  {DIM}⏱ Race:{RESET}     {timeout}s max  {DIM}•{RESET} {DIM}Grace:{RESET} {grace}s{DIM}•{RESET}{DIM}Format:{RESET}{fmt:<16}{FG_CYAN}│{RESET}")
     print(f"{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}")
     print()
 
@@ -332,18 +492,17 @@ def render_banner(config: dict):
 def render_menu_options(options: list, selected_index: int):
     """Render menu items with cursor highlight."""
     for idx, (icon, title, desc) in enumerate(options):
-        num = idx + 1
+        num = idx + 1 if idx < len(options) - 1 else 0
         if idx == selected_index:
-            # Highlighted item
             prefix = f"{BOLD}{FG_CYAN} ▶ {RESET}"
             num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
-            title_text = f"{BOLD}{FG_CYAN}{title:<26}{RESET}"
+            title_text = f"{BOLD}{FG_CYAN}{icon} {title:<26}{RESET}"
             desc_text = f"{FG_WHITE}{desc}{RESET}"
             print(f"{prefix} {num_badge}  {title_text}  {DIM}—{RESET} {desc_text}")
         else:
             prefix = "    "
             num_badge = f"{DIM}[{num}]{RESET}"
-            title_text = f"{FG_WHITE}{title:<26}{RESET}"
+            title_text = f"{FG_WHITE}{icon} {title:<26}{RESET}"
             desc_text = f"{DIM}{desc}{RESET}"
             print(f"{prefix} {num_badge}  {title_text}  {DIM}—{RESET} {desc_text}")
     print()
@@ -352,7 +511,7 @@ def render_menu_options(options: list, selected_index: int):
 def render_footer():
     """Render footer navigation hints."""
     print(f"{DIM}─────────────────────────────────────────────────────────────{RESET}")
-    print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[Ctrl+V]{RESET} Paste Link  {DIM}•{RESET} {FG_YELLOW}[1-7]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[q]{RESET} Exit")
+    print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[Ctrl+V]{RESET} Paste Link  {DIM}•{RESET} {FG_YELLOW}[1-4, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Exit")
 
 
 # ============================================================================
@@ -375,16 +534,16 @@ def action_download(config: dict, initial_url: str = None):
         print(f"    {BOLD}{FG_WHITE}{url}{RESET}\n")
     else:
         print(f"{DIM}Enter the video or stream URL to download.{RESET}")
-        print(f"{DIM}Type 0 or press Enter on empty input to cancel.{RESET}\n")
+        print(f"{DIM}Press Enter on empty input or type 0 / q / Esc to cancel.{RESET}\n")
 
         try:
             url = input(f"{BOLD}{FG_CYAN}Enter Video URL:{RESET} ").strip()
         except (KeyboardInterrupt, EOFError):
             return
 
-        if not url or url == "0":
+        if not url or url.lower() in ("0", "q", "exit", "esc"):
             print(f"\n{DIM}[+] Download cancelled.{RESET}")
-            time.sleep(0.5)
+            time.sleep(0.4)
             return
 
     if not valid_url(url):
@@ -405,8 +564,12 @@ def action_download(config: dict, initial_url: str = None):
     print(f"\n{BOLD}Select Desired Quality:{RESET}")
     for i, (_, label, desc) in enumerate(qualities, 1):
         print(f"  {FG_CYAN}[{i}]{RESET} {BOLD}{label:<24}{RESET} {DIM}({desc}){RESET}")
+    print(f"  {DIM}[0] Cancel & return to menu{RESET}")
 
     quality_input = input(f"\n{BOLD}Choice [1-{len(qualities)}, default 1]:{RESET} ").strip()
+    if quality_input.lower() in ("0", "q", "esc"):
+        return
+
     requested_quality = None
     if quality_input in ("1", "2", "3", "4", "5"):
         idx = int(quality_input) - 1
@@ -421,8 +584,10 @@ def action_download(config: dict, initial_url: str = None):
     from .downloader import download
 
     route = identify(url)
+    target_dl_dir = get_tool_output_dir("video", config)
     print(f"{DIM}  Platform : {route.platform}")
-    print(f"  Type     : {route.media_type}{RESET}\n")
+    print(f"  Type     : {route.media_type}")
+    print(f"  Folder   : {target_dl_dir}{RESET}\n")
 
     controller = ExtractionRaceController(
         url=url,
@@ -464,9 +629,8 @@ def action_download(config: dict, initial_url: str = None):
             print(f"\n{FG_GREEN}[✓] Download complete! Saved to:{RESET}")
             print(f"    {output}")
 
-            # Handle auto open vs prompt based on config
             if config.get("auto_open", True):
-                print(f"\n{FG_GREEN}[+] Auto-opening video in default media player...{RESET}")
+                print(f"\n{FG_GREEN}[+] Auto-opening in media player...{RESET}")
                 system_open(output)
             else:
                 try:
@@ -499,7 +663,7 @@ def get_video_files() -> list:
 
 
 def action_open(config: dict):
-    """Action 2: Browse and Open / Play Downloaded Video."""
+    """Action 3: Browse and Open / Play Downloaded Video."""
     videos = get_video_files()
     download_dir = get_download_dir()
 
@@ -523,7 +687,6 @@ def action_open(config: dict):
 
         print(f"{DIM} Directory: {download_dir} ({len(videos)} video(s)){RESET}\n")
 
-        # Display up to 10 items with scrolling window
         max_visible = 10
         start_idx = max(0, min(selected_idx - max_visible // 2, len(videos) - max_visible))
         end_idx = min(start_idx + max_visible, len(videos))
@@ -544,7 +707,7 @@ def action_open(config: dict):
             print(f"\n{DIM}  (Showing {start_idx+1}-{end_idx} of {len(videos)} files — scroll with ↑/↓){RESET}")
 
         print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
-        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Play Video  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Play Video  {DIM}•{RESET} {FG_RED}[Esc/q/0]{RESET} Back")
 
         key = read_key()
         if key == "UP":
@@ -559,12 +722,1394 @@ def action_open(config: dict):
             system_open(chosen)
             time.sleep(1.0)
             break
+        elif key in ("ESC", "q", "Q", "0"):
+            break
+
+
+# ============================================================================
+# TOOL DIRECTORY & VIDEO TOOLS ACTIONS
+# ============================================================================
+
+def action_change_tool_directory(config: dict, tool_name: str, tool_label: str = "Video Downloads"):
+    """Interactive output directory configuration for a specific tool."""
+    current = get_tool_output_dir(tool_name, config)
+    def_p = get_tool_default_dir(tool_name)
+    options = [
+        ("📂", "Browse Disk Explorer", "Select directory visually with arrow-key folder browser"),
+        ("⌨", "Type Directory Path", "Enter a custom absolute or relative directory path"),
+        ("🔄", f"Reset to Default ({def_p.name or 'Downloads'})", f"Restore to standard {tool_label} folder"),
+        ("←", "Cancel & Return", "Keep current directory"),
+    ]
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}📁  CHANGE {tool_label.upper():<28}{RESET}  {DIM}Custom Storage Path{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f" {DIM}Current Directory:{RESET} {FG_YELLOW}{current}{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<28}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<28}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_RED}[Esc/q/0]{RESET} Cancel")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2", "3"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q"):
+            break
+
+        if key == "ENTER":
+            if selected_idx == 0:
+                picked = browse_interactive_path(
+                    mode="folder",
+                    initial_dir=current,
+                    title=f"Select {tool_label} Folder",
+                )
+                if picked and picked.is_dir():
+                    set_tool_output_dir(tool_name, picked)
+                    clear_screen()
+                    show_cursor()
+                    print(f"\n{FG_GREEN}[✓] {tool_label} directory updated to:{RESET}\n    {picked}")
+                    time.sleep(1.2)
+                    break
+            elif selected_idx == 1:
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}Enter new output directory for {tool_label}:{RESET}")
+                try:
+                    manual = input("Path: ").strip().strip('"\'')
+                    if manual:
+                        p = Path(os.path.expanduser(manual)).resolve()
+                        p.mkdir(parents=True, exist_ok=True)
+                        set_tool_output_dir(tool_name, p)
+                        print(f"\n{FG_GREEN}[✓] {tool_label} directory updated to:{RESET}\n    {p}")
+                        time.sleep(1.2)
+                        break
+                except Exception as err:
+                    print(f"\n{FG_RED}[!] Could not set directory: {err}{RESET}")
+                    time.sleep(1.2)
+                hide_cursor()
+            elif selected_idx == 2:
+                default_p = get_tool_default_dir(tool_name)
+                set_tool_output_dir(tool_name, default_p)
+                clear_screen()
+                show_cursor()
+                print(f"\n{FG_GREEN}[✓] {tool_label} directory reset to default:{RESET}\n    {default_p}")
+                time.sleep(1.2)
+                break
+            elif selected_idx == 3:
+                break
+
+
+def action_file_conflict_settings(config: dict):
+    """Sub-Action: Configure Replace or Skip Files (Conflict Resolution) behavior as radio settings."""
+    hide_cursor()
+    selected_idx = 0
+
+    while True:
+        cfg = load_config()
+        current_policy = cfg.get("conflict_policy")  # None, "ask", "replace", "keep_both", "skip", "compare"
+        if current_policy == "ask":
+            current_policy = None
+
+        # Radio options: [1] Replace, [2] Keep Both, [3] Skip, [4] Compare, [0] Ask Every Time (All False / Default)
+        options = [
+            ("replace", "Replace the file in the destination", "Always overwrite existing file"),
+            ("keep_both", "Keep both files (Auto-number)", 'Save as "video (1).mp4", "(2).mp4"'),
+            ("skip", "Skip this file", "Skip download if file already exists"),
+            ("compare", "Compare info for both files", "Auto-open diff metadata comparison modal"),
+            (None, "Ask Every Time (Default: All False)", "Show interactive Replace/Skip dialog on collision"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}⚡  REPLACE OR SKIP FILES{RESET}             {DIM}File Conflict Policy{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f" {DIM}Choose automatic behavior when a downloaded file already exists:{RESET}\n")
+
+        for idx, (policy_key, title, desc) in enumerate(options):
+            num = idx + 1 if idx < 4 else 0
+            is_active = (current_policy == policy_key)
+            radio_mark = f"{FG_GREEN}(•){RESET}" if is_active else f"{DIM}( ){RESET}"
+            state_badge = f"{BG_CYAN}{FG_BLACK} ON {RESET}" if is_active else f"{BG_GRAY}{FG_WHITE} OFF {RESET}"
+
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {radio_mark} {num_badge} {BOLD}{FG_CYAN}{title:<38}{RESET} {state_badge} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {radio_mark} {num_badge} {FG_WHITE}{title:<38}{RESET} {state_badge} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter/Space]{RESET} Toggle Radio  {DIM}•{RESET} {FG_YELLOW}[1-4, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2", "3", "4"):
+            idx = int(key) - 1
+            selected_idx = idx
+            target_key = options[idx][0]
+            if current_policy == target_key:
+                cfg["conflict_policy"] = None
+            else:
+                cfg["conflict_policy"] = target_key
+            save_config(cfg)
+        elif key == "0":
+            selected_idx = 4
+            cfg["conflict_policy"] = None
+            save_config(cfg)
+        elif key in ("ENTER", "SPACE"):
+            target_key = options[selected_idx][0]
+            if current_policy == target_key:
+                cfg["conflict_policy"] = None
+            else:
+                cfg["conflict_policy"] = target_key
+            save_config(cfg)
         elif key in ("ESC", "q", "Q"):
             break
 
 
+def action_video_tools(config: dict):
+    """Sub-Action: Video Suite (Download, Play, Combine, Set Directory, Conflict Policy, Clean)."""
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        vid_dir = str(get_tool_output_dir("video", cfg))
+        if len(vid_dir) > 36:
+            vid_dir_disp = "..." + vid_dir[-33:]
+        else:
+            vid_dir_disp = vid_dir
+
+        conflict_pol = cfg.get("conflict_policy")
+        conflict_label_map = {
+            "replace": "Always Replace",
+            "keep_both": "Always Keep Both",
+            "skip": "Always Skip",
+            "compare": "Always Compare",
+        }
+        conflict_disp = conflict_label_map.get(conflict_pol, "Ask Every Time")
+
+        options = [
+            ("📥", "Download Video / Stream", "Extract and download stream from any URL"),
+            ("▶", "Open / Play Videos", "Browse and launch downloaded videos in player"),
+            ("🎞", "Combine / Merge Videos", "Concatenate multiple video clips into one file"),
+            ("📁", "Change Video Directory", f"Current: {vid_dir_disp}"),
+            ("⚡", "Replace or Skip Files", f"Policy: {conflict_disp}"),
+            ("🗑", "Clear / Manage Videos", "Delete selected or all downloaded videos"),
+            ("←", "Back to Main Menu", "Return to main dashboard"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🎬  VIDEO TOOLS & UTILITIES{RESET}       {DIM}Download, combine, play & clean{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<28}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<28}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-6, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2", "3", "4", "5", "6"):
+            num = int(key) - 1
+            selected_idx = num
+            if num == 0:
+                action_download(cfg)
+            elif num == 1:
+                action_open(cfg)
+            elif num == 2:
+                action_combine_videos(cfg)
+            elif num == 3:
+                action_change_tool_directory(cfg, "video", "Video Downloads")
+            elif num == 4:
+                action_file_conflict_settings(cfg)
+            elif num == 5:
+                action_clear_selected(cfg)
+        elif key == "0" or (key == "ENTER" and selected_idx == 6):
+            break
+        elif key == "ENTER":
+            if selected_idx == 0:
+                action_download(cfg)
+            elif selected_idx == 1:
+                action_open(cfg)
+            elif selected_idx == 2:
+                action_combine_videos(cfg)
+            elif selected_idx == 3:
+                action_change_tool_directory(cfg, "video", "Video Downloads")
+            elif selected_idx == 4:
+                action_file_conflict_settings(cfg)
+            elif selected_idx == 5:
+                action_clear_selected(cfg)
+            elif selected_idx == 6:
+                break
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def action_other_tools(config: dict):
+    """Action 2: Other Tools Consolidated Sub-Menu."""
+    options = [
+        ("🎬", "Video Tools", "Download video, play, combine, change directory, clean"),
+        ("🔄", "Media & Format Converter", "Convert Video to GIF, Audio, Text to PDF, Images"),
+        ("📚", "Comic & Manga Scraper", "Scrape & download comic chapters & image galleries"),
+        ("📦", "Images to PDF / CBZ Packager", "Bundle image directories into multi-page PDF or CBZ"),
+        ("🔍", "OCR (Image to Text)", "Extract readable text from images using Tesseract OCR"),
+        ("←", "Back to Main Menu", "Return to main dashboard"),
+    ]
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🧰  OTHER TOOLS & UTILITIES{RESET}       {DIM}Media converters & extractors{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<30}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<30}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-5, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2", "3", "4", "5"):
+            num = int(key) - 1
+            selected_idx = num
+            if num == 0:
+                action_video_tools(cfg)
+            elif num == 1:
+                action_convert(cfg)
+            elif num == 2:
+                action_comic_scraper(cfg)
+            elif num == 3:
+                action_pack_images(cfg)
+            elif num == 4:
+                action_ocr(cfg)
+        elif key == "0" or (key == "ENTER" and selected_idx == 5):
+            break
+        elif key == "ENTER":
+            if selected_idx == 0:
+                action_video_tools(cfg)
+            elif selected_idx == 1:
+                action_convert(cfg)
+            elif selected_idx == 2:
+                action_comic_scraper(cfg)
+            elif selected_idx == 3:
+                action_pack_images(cfg)
+            elif selected_idx == 4:
+                action_ocr(cfg)
+            elif selected_idx == 5:
+                break
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def action_convert(config: dict):
+    """Sub-Action: Interactive Media Converter."""
+    from .converter import (
+        convert_video_to_gif,
+        convert_video_to_audio,
+        convert_audio_to_audio,
+        convert_gif_to_mp4,
+        convert_image,
+        convert_text_to_pdf,
+        remux_or_transcode_video,
+    )
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        c_dir = str(get_tool_output_dir("converter", cfg))
+        c_disp = "..." + c_dir[-33:] if len(c_dir) > 36 else c_dir
+
+        conv_options = [
+            ("Video → Animated GIF (High Quality 2-Pass)", "Create smooth GIF with palette optimization"),
+            ("Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
+            ("Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
+            ("Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
+            ("Animated GIF → MP4 Video", "Convert GIF animation into lightweight MP4"),
+            ("Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
+            ("Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
+            ("Combine / Merge Video Clips", "Concatenate multiple video files in sequence"),
+            ("📁 Change Converter Directory", f"Current: {c_disp}"),
+            ("← Back to Other Tools", "Return to utilities menu"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🔄  MEDIA CONVERTER{RESET}        {DIM}FFmpeg & Pillow zero-bloat engine{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (label, desc) in enumerate(conv_options):
+            num = idx + 1 if idx < len(conv_options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num:>2} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num:>2}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-9, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(conv_options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(conv_options)
+        elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key == "0" or (key == "ENTER" and selected_idx == 9):
+            break
+
+        if key == "ENTER" and selected_idx == 7:  # Combine
+            action_combine_videos(cfg)
+            continue
+        elif key == "ENTER" and selected_idx == 8:  # Change directory
+            action_change_tool_directory(cfg, "converter", "Media Converter")
+            continue
+
+        if key == "ENTER" and selected_idx < 7:
+            choice_num = selected_idx
+
+            # Filter allowed extensions based on operation
+            ext_filter = None
+            if choice_num in (0, 1, 6):
+                ext_filter = VIDEO_EXTENSIONS
+            elif choice_num == 2:
+                ext_filter = AUDIO_EXTENSIONS
+            elif choice_num == 3:
+                ext_filter = DOCUMENT_EXTENSIONS
+            elif choice_num == 4:
+                ext_filter = {".gif"}
+            elif choice_num == 5:
+                ext_filter = IMAGE_EXTENSIONS
+
+            input_path = browse_interactive_path(
+                mode="file",
+                title=f"Pick File for: {conv_options[choice_num][0][:28]}",
+                allowed_exts=ext_filter,
+            )
+
+            if not input_path or not input_path.is_file():
+                continue
+
+            clear_screen()
+            show_cursor()
+            print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+            print(f"{DIM}Selected Input:{RESET} {FG_GREEN}{input_path}{RESET}\n")
+
+            out_dir = get_tool_output_dir("converter", cfg)
+
+            def _progress(pct: int, msg: str):
+                bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+                sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+                sys.stdout.flush()
+
+            try:
+                if choice_num == 0:  # Video -> GIF
+                    print(f"{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
+                    fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
+                    res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
+                    qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
+
+                    fps = int(fps_in) if fps_in.isdigit() else 30
+                    height = int(res_in) if res_in.isdigit() else 504
+                    colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
+
+                    out_gif = out_dir / f"{input_path.stem}.gif"
+                    print(f"\n[+] Converting to GIF: {out_gif.name}...")
+                    convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
+
+                elif choice_num == 1:  # Video -> MP3
+                    out_mp3 = out_dir / f"{input_path.stem}.mp3"
+                    print(f"\n[+] Extracting MP3 audio...")
+                    convert_video_to_audio(input_path, out_mp3, audio_format="mp3", bitrate="320k", progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp3}{RESET}")
+
+                elif choice_num == 2:  # Audio ↔ Audio
+                    fmt = input("  Target audio format (mp3/aac/wav/flac/ogg/m4a/opus, default mp3): ").strip().lower() or "mp3"
+                    out_aud = out_dir / f"{input_path.stem}.{fmt}"
+                    print(f"\n[+] Converting audio to {fmt.upper()}...")
+                    convert_audio_to_audio(input_path, out_aud, audio_format=fmt, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_aud}{RESET}")
+
+                elif choice_num == 3:  # Text -> PDF
+                    out_pdf = out_dir / f"{input_path.stem}.pdf"
+                    print(f"\n[+] Rendering Text Document to PDF...")
+                    convert_text_to_pdf(input_path, out_pdf, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_pdf}{RESET}")
+
+                elif choice_num == 4:  # GIF -> MP4
+                    out_mp4 = out_dir / f"{input_path.stem}.mp4"
+                    print(f"\n[+] Converting GIF to MP4...")
+                    convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
+
+                elif choice_num == 5:  # Image Format
+                    fmt = input("  Target format (png/jpg/webp/bmp/tiff, default png): ").strip().lower() or "png"
+                    out_img = out_dir / f"{input_path.stem}.{fmt}"
+                    print(f"\n[+] Converting image...")
+                    convert_image(input_path, out_img, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_img}{RESET}")
+
+                elif choice_num == 6:  # Remux / Transcode
+                    reencode_in = input("  Re-encode stream? [y/N, default N = fast remux]: ").strip().lower()
+                    reencode = reencode_in in ("y", "yes")
+                    out_vid = out_dir / f"{input_path.stem}_remux.mp4"
+                    print(f"\n[+] Processing video...")
+                    remux_or_transcode_video(input_path, out_vid, reencode=reencode, progress_callback=_progress)
+                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_vid}{RESET}")
+
+            except Exception as e:
+                print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+
+            pause_prompt()
+            hide_cursor()
+
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def action_combine_videos(config: dict):
+    """Sub-Action: Interactive Multi-Video Concatenation & Merger."""
+    from .converter import combine_videos
+
+    selected_videos: list[Path] = []
+    hide_cursor()
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🎞  COMBINE & MERGE VIDEOS{RESET}        {DIM}Fast zero-loss stream merger{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        if selected_videos:
+            print(f"{BOLD}Queued Video Clips ({len(selected_videos)} in sequence):{RESET}")
+            total_sz = 0
+            for idx, vp in enumerate(selected_videos, 1):
+                try:
+                    sz_mb = vp.stat().st_size / (1024 * 1024)
+                    total_sz += sz_mb
+                    sz_str = f"[{sz_mb:.1f} MB]"
+                except Exception:
+                    sz_str = ""
+                name_disp = vp.name if len(vp.name) <= 38 else vp.name[:35] + "..."
+                print(f"  {FG_CYAN}{idx:>2}.{RESET} {BOLD}{name_disp:<40}{RESET} {DIM}{sz_str}{RESET}")
+            print(f"  {DIM}Total estimated size: ~{total_sz:.1f} MB{RESET}\n")
+        else:
+            print(f"  {DIM}(No videos added yet. Add at least 2 videos to combine){RESET}\n")
+
+        opts = [
+            ("➕", "Add Video from Disk Explorer", "Browse and pick a video clip to add to sequence"),
+            ("📂", "Add All Videos from a Folder", "Bulk add all video files inside a chosen directory"),
+            ("❌", "Remove Last Added Video", "Remove the most recently added clip from the queue"),
+            ("🧹", "Clear Video Queue", "Reset and clear all selected videos"),
+            ("▶", "Start Combining Videos", f"Merge {len(selected_videos)} video(s) into one output file"),
+            ("←", "Back to Other Tools", "Return to utilities menu"),
+        ]
+
+        for i, (ico, name, desc) in enumerate(opts, 1):
+            num = i if i < len(opts) else 0
+            if i == 5 and len(selected_videos) < 2:
+                print(f"    {DIM}[{num}] {ico} {name:<32} — Requires at least 2 videos{RESET}")
+            else:
+                print(f"    {FG_CYAN}[{num}]{RESET} {ico} {BOLD}{name:<32}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_GREEN}[1-5, 0]{RESET} Select Option  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key in ("1", "➕"):
+            picked = browse_interactive_path(
+                mode="file",
+                title=f"Pick Video #{len(selected_videos) + 1} to Combine",
+                allowed_exts=VIDEO_EXTENSIONS,
+            )
+            if picked and picked.is_file():
+                selected_videos.append(picked)
+        elif key == "2":
+            folder = browse_interactive_path(
+                mode="folder",
+                title="Select Folder to Bulk-Add All Videos",
+            )
+            if folder and folder.is_dir():
+                found_vids = [
+                    p for p in sorted(folder.iterdir())
+                    if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+                ]
+                if found_vids:
+                    selected_videos.extend(found_vids)
+                    print(f"\n{FG_GREEN}[✓] Added {len(found_vids)} videos from {folder.name}{RESET}")
+                    time.sleep(0.8)
+                else:
+                    print(f"\n{FG_YELLOW}[!] No video files found in {folder.name}{RESET}")
+                    time.sleep(1.0)
+        elif key == "3":
+            if selected_videos:
+                removed = selected_videos.pop()
+                print(f"\n{DIM}[-] Removed: {removed.name}{RESET}")
+                time.sleep(0.5)
+        elif key == "4":
+            selected_videos.clear()
+            print(f"\n{DIM}[+] Queue cleared.{RESET}")
+            time.sleep(0.5)
+        elif key == "5":
+            if len(selected_videos) < 2:
+                print(f"\n{FG_YELLOW}[!] Please add at least 2 videos to combine.{RESET}")
+                time.sleep(1.0)
+                continue
+
+            clear_screen()
+            show_cursor()
+            print(f"\n{BOLD}{FG_CYAN}=== Combine {len(selected_videos)} Videos ==={RESET}\n")
+
+            conv_dir = get_tool_output_dir("converter", config)
+            default_name = f"combined_{selected_videos[0].stem}_{len(selected_videos)}clips.mp4"
+            out_name_in = input(f"Output filename [default: {default_name}]: ").strip()
+            out_name = out_name_in if out_name_in else default_name
+            if not out_name.lower().endswith(tuple(VIDEO_EXTENSIONS)):
+                out_name += ".mp4"
+
+            out_path = conv_dir / out_name
+
+            reencode_in = input(f"Force re-encode? (N = fast direct stream copy, y = re-encode) [y/N]: ").strip().lower()
+            reencode = reencode_in in ("y", "yes")
+
+            def _progress(pct: int, msg: str):
+                bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+                sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+                sys.stdout.flush()
+
+            try:
+                print(f"\n{BOLD}[+] Starting video combine...{RESET}")
+                result = combine_videos(
+                    video_paths=selected_videos,
+                    output_path=out_path,
+                    reencode=reencode,
+                    progress_callback=_progress,
+                )
+                print(f"\n\n{FG_GREEN}[✓] Videos merged successfully!{RESET}")
+                print(f"    Saved to: {result}")
+
+                if config.get("auto_open", True):
+                    print(f"\n{FG_GREEN}[+] Opening combined video in media player...{RESET}")
+                    system_open(result)
+                else:
+                    play_in = input(f"\n{BOLD}Open merged video now? [y/N]:{RESET} ").strip().lower()
+                    if play_in in ("y", "yes"):
+                        system_open(result)
+
+            except Exception as err:
+                print(f"\n\n{FG_RED}[-] Video combine failed: {err}{RESET}")
+
+            pause_prompt()
+            hide_cursor()
+
+        elif key in ("0", "ESC", "q", "Q"):
+            break
+
+
+def action_comic_scraper(config: dict):
+    """Sub-Action: Comic & Image Gallery Scraper."""
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        cm_dir = str(get_tool_output_dir("comic", cfg))
+        cm_disp = "..." + cm_dir[-33:] if len(cm_dir) > 36 else cm_dir
+
+        source_options = [
+            ("📂", "Browse Disk Explorer", "Select local HTML file, saved gallery, or image folder"),
+            ("🌐", "Enter Comic / Manga Web URL", "Scrape online chapter, manga, or web gallery from URL"),
+            ("📁", "Change Comic Output Directory", f"Current: {cm_disp}"),
+            ("←", "Back to Other Tools", "Return to utilities menu"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}📚  COMIC & MANGA SCRAPER{RESET}        {DIM}Web galleries & chapter scraper{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(source_options):
+            num = idx + 1 if idx < len(source_options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<32}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<32}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[Ctrl+V]{RESET} Paste URL  {DIM}•{RESET} {FG_RED}[Esc/q/0]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(source_options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(source_options)
+        elif isinstance(key, str) and key.startswith("URL:"):
+            source = key[4:].strip()
+            _run_comic_scrape_flow(cfg, source)
+            break
+        elif key == "CTRL_V":
+            clip_text = get_clipboard_text()
+            if clip_text:
+                source = clip_text.strip()
+                _run_comic_scrape_flow(cfg, source)
+                break
+            else:
+                print(f"\n{FG_YELLOW}[!] Clipboard is empty or could not be accessed.{RESET}")
+                time.sleep(1.0)
+        elif key in ("1", "2", "3"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key == "0" or (key == "ENTER" and selected_idx == 3):
+            break
+
+        if key == "ENTER":
+            if selected_idx == 0:  # Browse Disk Explorer
+                picked = browse_interactive_path(
+                    mode="any",
+                    title="Select Comic Folder or HTML File",
+                    allowed_exts={".html", ".htm", ".xhtml", ".cbz", ".zip", ".jpg", ".jpeg", ".png", ".webp"}
+                )
+                if not picked or not picked.exists():
+                    continue
+                _run_comic_scrape_flow(cfg, str(picked))
+                break
+            elif selected_idx == 1:  # Enter Web URL
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}{FG_CYAN}=== Enter Comic / Manga URL ==={RESET}\n")
+                print(f"{DIM}Enter web URL to scrape (or 0 / Esc to cancel):{RESET}\n")
+                try:
+                    url_in = input(f"{BOLD}{FG_CYAN}URL:{RESET} ").strip().strip('"\'')
+                except (KeyboardInterrupt, EOFError):
+                    url_in = ""
+                if not url_in or url_in.lower() in ("0", "q", "esc"):
+                    continue
+                _run_comic_scrape_flow(cfg, url_in)
+                break
+            elif selected_idx == 2:  # Change directory
+                action_change_tool_directory(cfg, "comic", "Comic Scraper")
+                continue
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def _run_comic_scrape_flow(config: dict, source: str):
+    """Execute the packaging selection, cookie check, and extraction for a chosen source."""
+    from .comic_scraper import scrape_and_download_comic
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"               {BOLD}COMIC & IMAGE GALLERY SCRAPER{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+    print(f" Source: {FG_YELLOW}{source}{RESET}\n")
+
+    print(f"{BOLD}Select Packaging Option:{RESET}")
+    print(f"  {FG_CYAN}[1]{RESET} Download Images to Folder Only")
+    print(f"  {FG_CYAN}[2]{RESET} Auto-bundle into Multi-Page PDF")
+    print(f"  {FG_CYAN}[3]{RESET} Auto-bundle into Comic Book Zip (.cbz)")
+    print(f"  {DIM}[0] Cancel{RESET}")
+
+    opt = input(f"\n{BOLD}Choice [1-3, default 1]:{RESET} ").strip()
+    if opt.lower() in ("0", "q", "esc"):
+        return
+
+    auto_format = "pdf" if opt == "2" else ("cbz" if opt == "3" else None)
+
+    print(f"\n{BOLD}Cookie File for Authentication [Optional]:{RESET}")
+    print(f"  {DIM}Press Enter to skip, or enter .txt path, or [b] to browse disk{RESET}")
+    cookie_in = input(f"Cookie path: ").strip().strip('"\'')
+    cookie_file = None
+    if cookie_in.lower() == "b":
+        cookie_path = browse_interactive_path(
+            mode="file",
+            title="Select Netscape Cookies File",
+            allowed_exts={".txt", ".cookie", ".cookies"}
+        )
+        if cookie_path and cookie_path.is_file():
+            cookie_file = cookie_path
+    elif cookie_in and cookie_in not in ("0", "none"):
+        p = Path(cookie_in)
+        if p.is_file():
+            cookie_file = p
+
+    def _progress(pct: int, msg: str):
+        bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.flush()
+
+    try:
+        print(f"\n{BOLD}[+] Starting extraction...{RESET}")
+        res = scrape_and_download_comic(
+            source=source,
+            output_base_dir=get_tool_output_dir("comic", config),
+            auto_format=auto_format,
+            cookie_file=cookie_file,
+            progress_callback=_progress,
+        )
+        print(f"\n\n{FG_GREEN}[✓] Extraction finished successfully!{RESET}")
+        print(f"    Saved to: {res}")
+    except Exception as e:
+        print(f"\n\n{FG_RED}[-] Scraping failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+
+def _run_pack_images_flow(config: dict):
+    """Execute interactive image packing into PDF or CBZ."""
+    from .packager import images_to_pdf, images_to_cbz, batch_pack_folders
+
+    folder = browse_interactive_path(
+        mode="folder",
+        title="Select Folder of Images to Pack",
+    )
+
+    if not folder or not folder.is_dir():
+        return
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"                 {BOLD}IMAGES TO PDF / CBZ PACKAGER{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+    print(f" Target Folder: {FG_YELLOW}{folder}{RESET}\n")
+
+    print(f"{BOLD}Select Output Format:{RESET}")
+    print(f"  {FG_CYAN}[1]{RESET} Multi-Page PDF (.pdf)")
+    print(f"  {FG_CYAN}[2]{RESET} Comic Book Zip (.cbz)")
+    print(f"  {DIM}[0] Cancel{RESET}")
+
+    fmt_choice = input(f"\n{BOLD}Choice [1-2, default 1]:{RESET} ").strip()
+    if fmt_choice.lower() in ("0", "q", "esc"):
+        return
+
+    target_fmt = "cbz" if fmt_choice == "2" else "pdf"
+
+    recurse_in = input(f"\n{BOLD}Recurse into nested subfolders? [y/N]:{RESET} ").strip().lower()
+    recurse = recurse_in in ("y", "yes")
+
+    def _progress(pct: int, msg: str):
+        bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.flush()
+
+    try:
+        out_dir = get_tool_output_dir("packager", config)
+        print(f"\n{BOLD}[+] Packaging images...{RESET}")
+        if recurse:
+            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
+            print(f"\n\n{FG_GREEN}[✓] Batch complete! Created {len(created)} {target_fmt.upper()} archives in:{RESET}")
+            print(f"    {out_dir}")
+        else:
+            out_file = out_dir / f"{folder.name}.{target_fmt}"
+            if target_fmt == "cbz":
+                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
+            else:
+                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
+
+            if ok:
+                print(f"\n\n{FG_GREEN}[✓] Successfully created {target_fmt.upper()} ({count} pages):{RESET}")
+                print(f"    {out_file}")
+            else:
+                print(f"\n\n{FG_YELLOW}[!] No supported images found in: {folder}{RESET}")
+    except Exception as e:
+        print(f"\n\n{FG_RED}[-] Packaging failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+def action_pack_images(config: dict):
+    """Sub-Action: Image Folder to PDF / CBZ Packager Menu."""
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        p_dir = str(get_tool_output_dir("packager", cfg))
+        p_disp = "..." + p_dir[-33:] if len(p_dir) > 36 else p_dir
+
+        pack_options = [
+            ("📦", "Select Folder to Pack into PDF/CBZ", "Browse disk and select folder of images"),
+            ("📁", "Change Packager Output Directory", f"Current: {p_disp}"),
+            ("←", "Back to Other Tools", "Return to utilities menu"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}📦  IMAGES TO PDF / CBZ PACKAGER{RESET}  {DIM}Bundle image folders into books{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(pack_options):
+            num = idx + 1 if idx < len(pack_options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<34}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<34}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-2, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(pack_options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(pack_options)
+        elif key in ("1", "2"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 2):
+            break
+
+        if key == "ENTER":
+            if selected_idx == 0:
+                _run_pack_images_flow(cfg)
+            elif selected_idx == 1:
+                action_change_tool_directory(cfg, "packager", "Image Packager")
+
+
+def _run_ocr_flow(config: dict):
+    """Execute interactive OCR text extraction on image or folder."""
+    from .ocr import run_ocr
+
+    target_path = browse_interactive_path(
+        mode="any",
+        title="Select Image or Image Folder for OCR",
+        allowed_exts=IMAGE_EXTENSIONS,
+    )
+
+    if not target_path or not target_path.exists():
+        return
+
+    clear_screen()
+    show_cursor()
+
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+    print(f"                 {BOLD}OCR — IMAGE TO TEXT EXTRACTOR{RESET}")
+    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+    print(f" Target: {FG_YELLOW}{target_path}{RESET}\n")
+
+    lang_in = input(f"{BOLD}Tesseract Language Code [default: eng, or 0 to cancel]:{RESET} ").strip() or "eng"
+    if lang_in.lower() in ("0", "q", "esc"):
+        return
+
+    combine_in = input(f"{BOLD}Combine into single .txt file? [Y/n]:{RESET} ").strip().lower()
+    combine = combine_in not in ("n", "no")
+
+    def _progress(pct: int, msg: str):
+        bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.flush()
+
+    try:
+        print(f"\n{BOLD}[+] Running OCR engine...{RESET}")
+        ok, out_path, preview = run_ocr(
+            target=target_path,
+            output_dir=get_tool_output_dir("ocr", config),
+            lang=lang_in,
+            combine_output=combine,
+            progress_callback=_progress,
+        )
+        print(f"\n\n{FG_GREEN}[✓] OCR Extraction Successful!{RESET}")
+        print(f"    Output: {out_path}\n")
+        if preview:
+            print("--- Extracted Text Preview ---")
+            print(preview[:500] + ("\n..." if len(preview) > 500 else ""))
+            print("------------------------------")
+    except Exception as e:
+        print(f"\n\n{FG_RED}[-] OCR failed: {e}{RESET}")
+
+    pause_prompt()
+
+
+def action_ocr(config: dict):
+    """Sub-Action: OCR Image to Text Extraction Menu."""
+    from .ocr import is_tesseract_available, get_tesseract_install_hint
+
+    if not is_tesseract_available():
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
+        print(f"                 {BOLD}OCR — IMAGE TO TEXT EXTRACTOR{RESET}")
+        print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
+        print(f"{FG_YELLOW}[!] {get_tesseract_install_hint()}{RESET}\n")
+        pause_prompt()
+        return
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        o_dir = str(get_tool_output_dir("ocr", cfg))
+        o_disp = "..." + o_dir[-33:] if len(o_dir) > 36 else o_dir
+
+        ocr_options = [
+            ("🔍", "Select Image or Folder for OCR", "Browse disk and select target to extract text"),
+            ("📁", "Change OCR Output Directory", f"Current: {o_disp}"),
+            ("←", "Back to Other Tools", "Return to utilities menu"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🔍  OCR IMAGE TO TEXT EXTRACTOR{RESET} {DIM}Tesseract optical recognition{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(ocr_options):
+            num = idx + 1 if idx < len(ocr_options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<34}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<34}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-2, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(ocr_options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(ocr_options)
+        elif key in ("1", "2"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 2):
+            break
+
+        if key == "ENTER":
+            if selected_idx == 0:
+                _run_ocr_flow(cfg)
+            elif selected_idx == 1:
+                action_change_tool_directory(cfg, "ocr", "OCR Transcripts")
+
+
+# ============================================================================
+# SETTINGS & DIRECTORY MANAGEMENT SUBMENU
+# ============================================================================
+
+def action_manage_all_directories(config: dict):
+    """Sub-Action: View & update custom output directories across all tools."""
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        v_dir = str(get_tool_output_dir("video", cfg))
+        c_dir = str(get_tool_output_dir("converter", cfg))
+        cm_dir = str(get_tool_output_dir("comic", cfg))
+        p_dir = str(get_tool_output_dir("packager", cfg))
+        o_dir = str(get_tool_output_dir("ocr", cfg))
+
+        items = [
+            ("🎬 Video Downloads Directory", v_dir, "video", "Video Downloads"),
+            ("🔄 Media Converter Directory", c_dir, "converter", "Media Converter"),
+            ("📚 Comic Scraper Directory", cm_dir, "comic", "Comic Scraper"),
+            ("📦 Packager Directory", p_dir, "packager", "Image Packager"),
+            ("🔍 OCR Transcripts Directory", o_dir, "ocr", "OCR Transcripts"),
+            ("⚡ Auto-Separate into Subfolders", "", "separate", "Separate Subfolders"),
+            ("🔄 Reset to Default Subfolders", "", "reset", "Reset All"),
+            ("← Back to Settings Submenu", "", "back", "Back"),
+        ]
+
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}📁  MANAGE OUTPUT DIRECTORIES{RESET}     {DIM}Per-tool custom storage paths{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (label, path_val, key_name, t_label) in enumerate(items):
+            num = idx + 1 if idx < len(items) - 1 else 0
+            disp_path = path_val
+            if len(disp_path) > 34:
+                disp_path = "..." + disp_path[-31:]
+
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                if disp_path:
+                    print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<32}{RESET} {FG_YELLOW}{disp_path}{RESET}")
+                else:
+                    print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                if disp_path:
+                    print(f"{prefix} {num_badge} {FG_WHITE}{label:<32}{RESET} {DIM}{disp_path}{RESET}")
+                else:
+                    print(f"{prefix} {num_badge} {FG_WHITE}{label}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-7, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(items)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(items)
+        elif key in ("1", "2", "3", "4", "5", "6", "7"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 7):
+            break
+
+        if key == "ENTER":
+            if selected_idx < 5:
+                _, _, t_key, t_lbl = items[selected_idx]
+                action_change_tool_directory(cfg, t_key, t_lbl)
+            elif selected_idx == 5:
+                # Auto-separate into distinct subfolders
+                clear_screen()
+                show_cursor()
+                cur_base = str(get_download_dir())
+                print(f"\n{BOLD}{FG_CYAN}=== Auto-Separate Output Directories ==={RESET}\n")
+                print("This will organize all tool outputs into distinct dedicated subfolders:")
+                print(f"  • Video Downloads  → <base>/Videos")
+                print(f"  • Media Converter  → <base>/Converted")
+                print(f"  • Comic Scraper    → <base>/Comics")
+                print(f"  • Image Packager   → <base>/Packaged")
+                print(f"  • OCR Transcripts  → <base>/OCR\n")
+                print(f"Base Directory: {FG_YELLOW}{cur_base}{RESET}\n")
+
+                ans = input(f"{BOLD}Separate all tool directories under this base folder? [Y/n]: {RESET}").strip().lower()
+                if ans not in ("n", "no"):
+                    res = auto_separate_all_tool_dirs(cur_base, create_video_subfolder=True)
+                    clear_screen()
+                    print(f"\n{FG_GREEN}[✓] Successfully separated all tool directories into dedicated folders:{RESET}\n")
+                    for t_name, t_p in res.items():
+                        print(f"    • {t_name.capitalize():<12}: {t_p}")
+                    time.sleep(1.8)
+                hide_cursor()
+            elif selected_idx == 6:
+                # Reset to default subfolders
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}{FG_CYAN}=== Reset Tool Directories to Defaults ==={RESET}\n")
+                ans = input(f"{BOLD}Reset all tool directories back to default system Downloads subfolders? [y/N]: {RESET}").strip().lower()
+                if ans in ("y", "yes"):
+                    res = reset_all_tool_dirs_to_defaults()
+                    clear_screen()
+                    print(f"\n{FG_GREEN}[✓] All tool directories reset to default subfolders:{RESET}\n")
+                    for t_name, t_p in res.items():
+                        print(f"    • {t_name.capitalize():<12}: {t_p}")
+                    time.sleep(1.8)
+                hide_cursor()
+
+
+def action_settings_and_cleanup(config: dict):
+    """Action 3: Settings & Cleanup Consolidated Sub-Menu."""
+    options = [
+        ("📁", "Manage Tool Output Directories", "Configure custom storage paths for each tool"),
+        ("⚙", "Engine & Extraction Settings", "Adjust race timers, merge formats, and tier toggles"),
+        ("🗑", "Clear Selected Videos", "Interactive multi-select deletion checklist"),
+        ("💥", "Clear All Videos", "Wipe all downloaded video files from folder"),
+        ("📜", "View Download History", "Display log of previous media extractions"),
+        ("←", "Back to Main Menu", "Return to main dashboard"),
+    ]
+
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        cfg = load_config()
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}⚙   SETTINGS & PREFERENCES{RESET}      {DIM}Output directories, engines & history{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<32}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<32}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-5, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2", "3", "4", "5"):
+            num = int(key) - 1
+            selected_idx = num
+            if num == 0:
+                action_manage_all_directories(cfg)
+            elif num == 1:
+                action_settings(cfg)
+            elif num == 2:
+                action_clear_selected(cfg)
+            elif num == 3:
+                action_clear_all(cfg)
+            elif num == 4:
+                show_history()
+                pause_prompt()
+        elif key == "0" or (key == "ENTER" and selected_idx == 5):
+            break
+        elif key == "ENTER":
+            if selected_idx == 0:
+                action_manage_all_directories(cfg)
+            elif selected_idx == 1:
+                action_settings(cfg)
+            elif selected_idx == 2:
+                action_clear_selected(cfg)
+            elif selected_idx == 3:
+                action_clear_all(cfg)
+            elif selected_idx == 4:
+                show_history()
+                pause_prompt()
+            elif selected_idx == 5:
+                break
+        elif key in ("ESC", "q", "Q"):
+            break
+
+
+def action_settings(config: dict):
+    """Sub-Action: Interactive Engine Settings Sub-Menu."""
+    hide_cursor()
+    selected_idx = 0
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}⚙   ENGINE CONFIGURATION{RESET}    {DIM}Toggle tiers, format & timeouts{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+
+        ytdlp_on = config.get("use_ytdlp", True)
+        scrapling_on = config.get("use_scrapling", True)
+        static_on = config.get("use_static_scanner", True)
+        browser_on = config.get("use_browser", True)
+        terminals_on = config.get("spawn_terminals", False)
+        timeout = config.get("race_timeout", 20)
+        grace = config.get("browser_grace_seconds", 2.5)
+        merge_fmt = config.get("merge_format", "mp4")
+        confidence = config.get("confidence_threshold", 50)
+        auto_open = config.get("auto_open", True)
+
+        def badge(val: bool) -> str:
+            return f"{BG_CYAN}{FG_BLACK} ON {RESET}" if val else f"{BG_GRAY}{FG_WHITE} OFF {RESET}"
+
+        def yes_no_badge(val: bool) -> str:
+            return f"{BG_CYAN}{FG_BLACK} YES {RESET}" if val else f"{BG_GRAY}{FG_WHITE} NO {RESET}"
+
+        conflict_pol = config.get("conflict_policy")
+        conflict_label_map = {
+            "replace": "Always Replace",
+            "keep_both": "Always Keep Both",
+            "skip": "Always Skip",
+            "compare": "Always Compare",
+        }
+        conflict_disp = conflict_label_map.get(conflict_pol, "Ask Every Time")
+
+        items = [
+            ("Auto-Open on Download", yes_no_badge(auto_open), "Automatically play video after download"),
+            ("Replace or Skip Files", f"{FG_YELLOW}{conflict_disp}{RESET}", "Collision policy: Replace, Keep Both, Skip, Compare"),
+            ("Container Merge Format", f"{FG_YELLOW}{merge_fmt.upper()}{RESET}  (mp4 / mkv)", "Toggle output format"),
+            ("Race Timeout", f"{FG_YELLOW}{timeout}s{RESET}", "Multi-agent tier race max wait"),
+            ("Browser Tier Grace Timer", f"{FG_YELLOW}{grace}s{RESET}", "Delay before starting heavy headless browser"),
+            ("Confidence Threshold", f"{FG_YELLOW}{confidence}{RESET}", "Minimum candidate score required to win"),
+            ("Separate Terminal Windows", badge(terminals_on), "Spawn physical terminal windows vs single-terminal"),
+            ("Tier 1: yt-dlp Native Agent", badge(ytdlp_on), "Fast direct extractor & format selector"),
+            ("Tier 2: Scrapling Adaptive Agent", badge(scrapling_on), "Intelligent HTTP & stealth DOM scanner"),
+            ("Tier 3: Static HTML Scanner Agent", badge(static_on), "BeautifulSoup & regex stream matcher"),
+            ("Tier 4: Headless Browser Agent", badge(browser_on), "Selenium Chromium network sniffer"),
+            ("← Back to Settings & Cleanup", "", "Return to previous menu"),
+        ]
+
+        for idx, (label, val_str, desc) in enumerate(items):
+            num = idx + 1 if idx < len(items) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num:>2} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<34}{RESET} {val_str:<22} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num:>2}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{label:<34}{RESET} {val_str:<22} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter/Space]{RESET} Toggle / Edit  {DIM}•{RESET} {FG_RED}[Esc/q/0]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(items)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(items)
+        elif key in ("ENTER", "SPACE"):
+            if selected_idx == 0:
+                config["auto_open"] = not auto_open
+                save_config(config)
+            elif selected_idx == 1:
+                action_file_conflict_settings(config)
+            elif selected_idx == 2:
+                config["merge_format"] = "mkv" if merge_fmt == "mp4" else "mp4"
+                save_config(config)
+            elif selected_idx == 3:
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}Set Race Timeout (seconds):{RESET}")
+                try:
+                    val = input(f"Current: {timeout}s > ").strip()
+                    if val.isdigit() and int(val) > 0:
+                        config["race_timeout"] = int(val)
+                        save_config(config)
+                except Exception:
+                    pass
+                hide_cursor()
+            elif selected_idx == 4:
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}Set Browser Grace Timer (seconds):{RESET}")
+                try:
+                    val = input(f"Current: {grace}s > ").strip()
+                    f_val = float(val)
+                    if f_val >= 0:
+                        config["browser_grace_seconds"] = f_val
+                        save_config(config)
+                except Exception:
+                    pass
+                hide_cursor()
+            elif selected_idx == 5:
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}Set Candidate Score Confidence Threshold (1-100):{RESET}")
+                try:
+                    val = input(f"Current: {confidence} > ").strip()
+                    if val.isdigit() and 1 <= int(val) <= 100:
+                        config["confidence_threshold"] = int(val)
+                        save_config(config)
+                except Exception:
+                    pass
+                hide_cursor()
+            elif selected_idx == 6:
+                config["spawn_terminals"] = not terminals_on
+                save_config(config)
+            elif selected_idx == 7:
+                config["use_ytdlp"] = not ytdlp_on
+                save_config(config)
+            elif selected_idx == 8:
+                config["use_scrapling"] = not scrapling_on
+                save_config(config)
+            elif selected_idx == 9:
+                config["use_static_scanner"] = not static_on
+                save_config(config)
+            elif selected_idx == 10:
+                config["use_browser"] = not browser_on
+                save_config(config)
+            elif selected_idx == 11:
+                break
+
+        elif key in ("ESC", "q", "Q", "0"):
+            break
+
+
+def action_change_directory(config: dict):
+    """Sub-Action: Change Output Directory using disk browser."""
+    new_path = browse_interactive_path(
+        mode="folder",
+        title="Select New Download Storage Directory",
+    )
+
+    if not new_path:
+        return
+
+    clear_screen()
+    show_cursor()
+    try:
+        new_path.mkdir(parents=True, exist_ok=True)
+        config["download_directory"] = str(new_path)
+        if save_config(config):
+            print(f"\n{FG_GREEN}[✓] Output directory successfully updated to:{RESET}")
+            print(f"    {new_path}")
+        else:
+            print(f"\n{FG_RED}[!] Failed to write new path to config.json.{RESET}")
+    except Exception as err:
+        print(f"\n{FG_RED}[!] Could not create or access directory: {err}{RESET}")
+
+    pause_prompt()
+
+
 def action_clear_selected(config: dict):
-    """Action 3: Interactive Multi-Select Checklist Video Cleaner."""
+    """Sub-Action: Interactive Multi-Select Checklist Video Cleaner."""
     videos = get_video_files()
     download_dir = get_download_dir()
 
@@ -573,11 +2118,10 @@ def action_clear_selected(config: dict):
         print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
         print(f"               {BOLD}CLEAR SELECTED VIDEOS{RESET}")
         print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-        print(f"{FG_YELLOW}[!] No video files found to delete.{RESET}")
+        print(f"{FG_YELLOW}[!] No video files found to delete in: {download_dir}{RESET}")
         pause_prompt()
         return
 
-    # Selection state dict: {index: bool}
     selected_flags = [False] * len(videos)
     cursor_idx = 0
     hide_cursor()
@@ -596,7 +2140,6 @@ def action_clear_selected(config: dict):
 
         print(f" Selected: {FG_YELLOW}{selected_count}{RESET} / {len(videos)} files  {DIM}•{RESET}  To free: {FG_YELLOW}{selected_size_mb:.1f} MB{RESET}\n")
 
-        # Scroll window
         max_visible = 10
         start_idx = max(0, min(cursor_idx - max_visible // 2, len(videos) - max_visible))
         end_idx = min(start_idx + max_visible, len(videos))
@@ -619,7 +2162,7 @@ def action_clear_selected(config: dict):
             print(f"\n{DIM}  (Showing {start_idx+1}-{end_idx} of {len(videos)} files){RESET}")
 
         print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
-        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_YELLOW}[Space]{RESET} Toggle  {DIM}•{RESET} {FG_BLUE}[a]{RESET} Select All  {DIM}•{RESET} {FG_RED}[Enter]{RESET} Delete  {DIM}•{RESET} {DIM}[Esc/q]{RESET} Cancel")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_YELLOW}[Space]{RESET} Toggle  {DIM}•{RESET} {FG_BLUE}[a]{RESET} Select All  {DIM}•{RESET} {FG_RED}[Enter]{RESET} Delete  {DIM}•{RESET} {DIM}[Esc/q/0]{RESET} Cancel")
 
         key = read_key()
         if key == "UP":
@@ -659,14 +2202,14 @@ def action_clear_selected(config: dict):
                 pause_prompt()
             else:
                 print(f"\n{DIM}[+] Deletion cancelled.{RESET}")
-                time.sleep(0.8)
+                time.sleep(0.6)
             break
-        elif key in ("ESC", "q", "Q"):
+        elif key in ("ESC", "q", "Q", "0"):
             break
 
 
 def action_clear_all(config: dict):
-    """Action 4: Clear All Videos with total size calculation."""
+    """Sub-Action: Clear All Videos."""
     clear_screen()
     show_cursor()
 
@@ -707,548 +2250,22 @@ def action_clear_all(config: dict):
     pause_prompt()
 
 
-def action_change_directory(config: dict):
-    """Action 5: Change Output Directory and persist to config."""
-    clear_screen()
-    show_cursor()
-
-    current_dir = get_download_dir()
-
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
-    print(f"               {BOLD}CHANGE OUTPUT DIRECTORY{RESET}")
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-    print(f" Current Directory: {FG_YELLOW}{current_dir}{RESET}\n")
-    print(f"{DIM}Enter new folder path (e.g. /sdcard/Download, ~/Videos, C:\\Downloads).{RESET}")
-    print(f"{DIM}Press Enter without typing to keep current directory.{RESET}\n")
-
-    try:
-        new_path_str = input(f"{BOLD}{FG_CYAN}New Path:{RESET} ").strip()
-    except (KeyboardInterrupt, EOFError):
-        return
-
-    if not new_path_str:
-        print(f"\n{DIM}[+] Keeping current directory.{RESET}")
-        time.sleep(0.5)
-        return
-
-    new_path = Path(os.path.expanduser(new_path_str)).resolve()
-    try:
-        new_path.mkdir(parents=True, exist_ok=True)
-        config["download_directory"] = str(new_path)
-        if save_config(config):
-            print(f"\n{FG_GREEN}[✓] Output directory successfully updated to:{RESET}")
-            print(f"    {new_path}")
-        else:
-            print(f"\n{FG_RED}[!] Failed to write new path to config.json.{RESET}")
-    except Exception as err:
-        print(f"\n{FG_RED}[!] Could not create or access directory: {err}{RESET}")
-
-    pause_prompt()
-
-
-def action_settings(config: dict):
-    """Action 6: Interactive Settings & Engine Configuration Sub-Menu."""
-    hide_cursor()
-    selected_idx = 0
-
-    while True:
-        clear_screen()
-        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
-        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}⚙   SETTINGS & ENGINES{RESET}    {DIM}Toggle tiers, format & timeouts{RESET}  {BOLD}{FG_CYAN}│{RESET}")
-        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
-
-        # Current values
-        ytdlp_on = config.get("use_ytdlp", True)
-        scrapling_on = config.get("use_scrapling", True)
-        static_on = config.get("use_static_scanner", True)
-        browser_on = config.get("use_browser", True)
-        terminals_on = config.get("spawn_terminals", False)
-        timeout = config.get("race_timeout", 20)
-        grace = config.get("browser_grace_seconds", 2.5)
-        merge_fmt = config.get("merge_format", "mp4")
-        confidence = config.get("confidence_threshold", 50)
-
-        auto_open = config.get("auto_open", True)
-
-        def badge(val: bool) -> str:
-            return f"{BG_CYAN}{FG_BLACK} ON {RESET}" if val else f"{BG_GRAY}{FG_WHITE} OFF {RESET}"
-
-        def yes_no_badge(val: bool) -> str:
-            return f"{BG_CYAN}{FG_BLACK} YES {RESET}" if val else f"{BG_GRAY}{FG_WHITE} NO {RESET}"
-
-        items = [
-            ("Auto-Open on Download", yes_no_badge(auto_open), "Automatically play video after download"),
-            ("Container Merge Format", f"{FG_YELLOW}{merge_fmt.upper()}{RESET}  (mp4 / mkv)", "Toggle output format"),
-            ("Race Timeout", f"{FG_YELLOW}{timeout}s{RESET}", "Multi-agent tier race max wait"),
-            ("Browser Tier Grace Timer", f"{FG_YELLOW}{grace}s{RESET}", "Delay before starting heavy headless browser"),
-            ("Confidence Threshold", f"{FG_YELLOW}{confidence}{RESET}", "Minimum candidate score required to win"),
-            ("Separate Terminal Windows", badge(terminals_on), "Spawn physical terminal windows vs single-terminal"),
-            ("Tier 1: yt-dlp Native Agent", badge(ytdlp_on), "Fast direct extractor & format selector"),
-            ("Tier 2: Scrapling Adaptive Agent", badge(scrapling_on), "Intelligent HTTP & stealth DOM scanner"),
-            ("Tier 3: Static HTML Scanner Agent", badge(static_on), "BeautifulSoup & regex stream matcher"),
-            ("Tier 4: Headless Browser Agent", badge(browser_on), "Selenium Chromium network sniffer"),
-            ("← Back to Main Menu", "", "Return to main dashboard"),
-        ]
-
-        for idx, (label, val_str, desc) in enumerate(items):
-            if idx == selected_idx:
-                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
-                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {idx+1:>2} {RESET}"
-                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<34}{RESET} {val_str:<22} {DIM}— {desc}{RESET}")
-            else:
-                prefix = "   "
-                num_badge = f"{DIM}[{idx+1:>2}]{RESET}"
-                print(f"{prefix} {num_badge} {FG_WHITE}{label:<34}{RESET} {val_str:<22} {DIM}— {desc}{RESET}")
-
-        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
-        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter/Space]{RESET} Toggle / Edit  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
-
-        key = read_key()
-        if key == "UP":
-            selected_idx = (selected_idx - 1) % len(items)
-        elif key == "DOWN":
-            selected_idx = (selected_idx + 1) % len(items)
-        elif key in ("ENTER", "SPACE"):
-            if selected_idx == 0:  # Auto-Open
-                config["auto_open"] = not auto_open
-                save_config(config)
-            elif selected_idx == 1:  # Merge format
-                config["merge_format"] = "mkv" if merge_fmt == "mp4" else "mp4"
-                save_config(config)
-            elif selected_idx == 2:  # Timeout
-                clear_screen()
-                show_cursor()
-                print(f"\n{BOLD}Set Race Timeout (seconds):{RESET}")
-                try:
-                    val = input(f"Current: {timeout}s > ").strip()
-                    if val.isdigit() and int(val) > 0:
-                        config["race_timeout"] = int(val)
-                        save_config(config)
-                except Exception:
-                    pass
-                hide_cursor()
-            elif selected_idx == 3:  # Grace
-                clear_screen()
-                show_cursor()
-                print(f"\n{BOLD}Set Browser Grace Timer (seconds):{RESET}")
-                try:
-                    val = input(f"Current: {grace}s > ").strip()
-                    f_val = float(val)
-                    if f_val >= 0:
-                        config["browser_grace_seconds"] = f_val
-                        save_config(config)
-                except Exception:
-                    pass
-                hide_cursor()
-            elif selected_idx == 4:  # Confidence
-                clear_screen()
-                show_cursor()
-                print(f"\n{BOLD}Set Candidate Score Confidence Threshold (1-100):{RESET}")
-                try:
-                    val = input(f"Current: {confidence} > ").strip()
-                    if val.isdigit() and 1 <= int(val) <= 100:
-                        config["confidence_threshold"] = int(val)
-                        save_config(config)
-                except Exception:
-                    pass
-                hide_cursor()
-            elif selected_idx == 5:  # Terminals
-                config["spawn_terminals"] = not terminals_on
-                save_config(config)
-            elif selected_idx == 6:  # yt-dlp
-                config["use_ytdlp"] = not ytdlp_on
-                save_config(config)
-            elif selected_idx == 7:  # Scrapling
-                config["use_scrapling"] = not scrapling_on
-                save_config(config)
-            elif selected_idx == 8:  # Static
-                config["use_static_scanner"] = not static_on
-                save_config(config)
-            elif selected_idx == 9:  # Browser
-                config["use_browser"] = not browser_on
-                save_config(config)
-            elif selected_idx == 10:  # Back
-                break
-
-        elif key in ("ESC", "q", "Q"):
-            break
-
-
-def action_convert(config: dict):
-    """Action: Interactive Media Converter Sub-Menu."""
-    from .converter import (
-        convert_video_to_gif,
-        convert_video_to_audio,
-        convert_audio_to_audio,
-        convert_gif_to_mp4,
-        convert_image,
-        convert_text_to_pdf,
-        remux_or_transcode_video,
-    )
-
-    conv_options = [
-        ("Video → Animated GIF (High Quality 2-Pass)", "Create smooth GIF with palette optimization"),
-        ("Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
-        ("Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
-        ("Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
-        ("Animated GIF → MP4 Video", "Convert GIF animation into lightweight MP4"),
-        ("Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
-        ("Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
-        ("← Back to Main Menu", "Return to main dashboard"),
-    ]
-
-    selected_idx = 0
-    hide_cursor()
-
-    while True:
-        clear_screen()
-        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
-        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🔄  MEDIA CONVERTER{RESET}        {DIM}FFmpeg & Pillow zero-bloat engine{RESET}  {BOLD}{FG_CYAN}│{RESET}")
-        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
-
-        for idx, (label, desc) in enumerate(conv_options):
-            if idx == selected_idx:
-                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
-                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {idx+1:>2} {RESET}"
-                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<46}{RESET} {DIM}— {desc}{RESET}")
-            else:
-                prefix = "   "
-                num_badge = f"{DIM}[{idx+1:>2}]{RESET}"
-                print(f"{prefix} {num_badge} {FG_WHITE}{label:<46}{RESET} {DIM}— {desc}{RESET}")
-
-        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
-        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
-
-        key = read_key()
-        if key == "UP":
-            selected_idx = (selected_idx - 1) % len(conv_options)
-        elif key == "DOWN":
-            selected_idx = (selected_idx + 1) % len(conv_options)
-        elif key in ("ENTER", "1", "2", "3", "4", "5", "6", "7", "8"):
-            choice_num = (int(key) - 1) if key in "12345678" else selected_idx
-            if choice_num == 7:  # Back
-                break
-
-            clear_screen()
-            show_cursor()
-
-            print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}\n")
-            videos = get_video_files()
-            if videos and choice_num in (0, 1, 2, 6):
-                print(f"{BOLD}Recent files in download directory:{RESET}")
-                for i, v in enumerate(videos[:5], 1):
-                    print(f"  {FG_CYAN}[{i}]{RESET} {v.name}")
-                print()
-
-            raw_input = input(f"{BOLD}Enter file path (or number 1-{min(5, len(videos))}):{RESET} ").strip()
-            if not raw_input or raw_input == "0":
-                hide_cursor()
-                continue
-
-            input_path = None
-            if raw_input.isdigit() and 1 <= int(raw_input) <= len(videos):
-                input_path = videos[int(raw_input) - 1]
-            else:
-                cleaned = raw_input.strip('"\'')
-                input_path = Path(cleaned)
-
-            if not input_path.is_file():
-                print(f"\n{FG_RED}[-] File not found: {input_path}{RESET}")
-                pause_prompt()
-                hide_cursor()
-                continue
-
-            def _progress(pct: int, msg: str):
-                print(f"  [{pct:>3}%] {msg}")
-
-            try:
-                if choice_num == 0:  # Video -> GIF
-                    print(f"\n{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
-                    fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
-                    res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
-                    qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
-
-                    fps = int(fps_in) if fps_in.isdigit() else 30
-                    height = int(res_in) if res_in.isdigit() else 504
-                    colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
-
-                    out_gif = input_path.parent / f"{input_path.stem}.gif"
-                    print(f"\n[+] Converting to GIF: {out_gif.name}...")
-                    convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
-
-                elif choice_num == 1:  # Video -> MP3
-                    out_mp3 = input_path.parent / f"{input_path.stem}.mp3"
-                    print(f"\n[+] Extracting MP3 audio...")
-                    convert_video_to_audio(input_path, out_mp3, audio_format="mp3", bitrate="320k", progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_mp3}{RESET}")
-
-                elif choice_num == 2:  # Audio ↔ Audio
-                    fmt = input("  Target audio format (mp3/aac/wav/flac/ogg/m4a/opus, default mp3): ").strip().lower() or "mp3"
-                    out_aud = input_path.parent / f"{input_path.stem}.{fmt}"
-                    print(f"\n[+] Converting audio to {fmt.upper()}...")
-                    convert_audio_to_audio(input_path, out_aud, audio_format=fmt, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_aud}{RESET}")
-
-                elif choice_num == 3:  # Text -> PDF
-                    out_pdf = input_path.parent / f"{input_path.stem}.pdf"
-                    print(f"\n[+] Rendering Text Document to PDF...")
-                    convert_text_to_pdf(input_path, out_pdf, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_pdf}{RESET}")
-
-                elif choice_num == 4:  # GIF -> MP4
-                    out_mp4 = input_path.parent / f"{input_path.stem}.mp4"
-                    print(f"\n[+] Converting GIF to MP4...")
-                    convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
-
-                elif choice_num == 5:  # Image Format
-                    fmt = input("  Target format (png/jpg/webp/bmp/tiff, default png): ").strip().lower() or "png"
-                    out_img = input_path.parent / f"{input_path.stem}.{fmt}"
-                    print(f"\n[+] Converting image...")
-                    convert_image(input_path, out_img, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_img}{RESET}")
-
-                elif choice_num == 6:  # Remux / Transcode
-                    reencode_in = input("  Re-encode stream? [y/N, default N = fast remux]: ").strip().lower()
-                    reencode = reencode_in in ("y", "yes")
-                    out_vid = input_path.parent / f"{input_path.stem}_remux.mp4"
-                    print(f"\n[+] Processing video...")
-                    remux_or_transcode_video(input_path, out_vid, reencode=reencode, progress_callback=_progress)
-                    print(f"\n{FG_GREEN}[✓] Saved: {out_vid}{RESET}")
-
-            except Exception as e:
-                print(f"\n{FG_RED}[-] Conversion failed: {e}{RESET}")
-
-            pause_prompt()
-            hide_cursor()
-
-        elif key in ("ESC", "q", "Q"):
-            break
-
-
-def action_comic_scraper(config: dict):
-    """Action: Comic & Image Gallery Scraper."""
-    from .comic_scraper import scrape_and_download_comic
-
-    clear_screen()
-    show_cursor()
-
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
-    print(f"               {BOLD}COMIC & IMAGE GALLERY SCRAPER{RESET}")
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-
-    print(f"{DIM}Enter a comic / gallery URL, local HTML file path, or image folder.{RESET}")
-    print(f"{DIM}Type 0 or press Enter on empty input to cancel.{RESET}\n")
-
-    try:
-        source = input(f"{BOLD}{FG_CYAN}Source (URL, HTML path, or folder):{RESET} ").strip().strip('"\'')
-    except (KeyboardInterrupt, EOFError):
-        return
-
-    if not source or source == "0":
-        return
-
-    print(f"\n{BOLD}Select Packaging Option:{RESET}")
-    print(f"  {FG_CYAN}[1]{RESET} Download Images to Folder Only")
-    print(f"  {FG_CYAN}[2]{RESET} Auto-bundle into Multi-Page PDF")
-    print(f"  {FG_CYAN}[3]{RESET} Auto-bundle into Comic Book Zip (.cbz)")
-
-    opt = input(f"\n{BOLD}Choice [1-3, default 1]:{RESET} ").strip()
-    auto_format = "pdf" if opt == "2" else ("cbz" if opt == "3" else None)
-
-    cookie_in = input(f"\n{BOLD}Cookie file (.txt) [optional, press Enter to skip]:{RESET} ").strip().strip('"\'')
-    cookie_file = Path(cookie_in) if cookie_in else None
-
-    def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
-
-    try:
-        print(f"\n{BOLD}[+] Starting extraction...{RESET}")
-        res = scrape_and_download_comic(
-            source=source,
-            auto_format=auto_format,
-            cookie_file=cookie_file,
-            progress_callback=_progress,
-        )
-        print(f"\n{FG_GREEN}[✓] Extraction finished successfully!{RESET}")
-        print(f"    Saved to: {res}")
-    except Exception as e:
-        print(f"\n{FG_RED}[-] Scraping failed: {e}{RESET}")
-
-    pause_prompt()
-
-
-def action_pack_images(config: dict):
-    """Action: Image Folder to PDF / CBZ Packager."""
-    from .packager import images_to_pdf, images_to_cbz, batch_pack_folders
-
-    clear_screen()
-    show_cursor()
-
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
-    print(f"                 {BOLD}IMAGES TO PDF / CBZ PACKAGER{RESET}")
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-
-    print(f"{DIM}Select a folder containing images to pack into a single PDF or CBZ.{RESET}\n")
-
-    try:
-        folder_str = input(f"{BOLD}{FG_CYAN}Enter Folder Path:{RESET} ").strip().strip('"\'')
-    except (KeyboardInterrupt, EOFError):
-        return
-
-    if not folder_str or folder_str == "0":
-        return
-
-    folder = Path(folder_str)
-    if not folder.is_dir():
-        print(f"\n{FG_RED}[-] Directory not found: {folder}{RESET}")
-        pause_prompt()
-        return
-
-    print(f"\n{BOLD}Select Output Format:{RESET}")
-    print(f"  {FG_CYAN}[1]{RESET} Multi-Page PDF (.pdf)")
-    print(f"  {FG_CYAN}[2]{RESET} Comic Book Zip (.cbz)")
-
-    fmt_choice = input(f"\n{BOLD}Choice [1-2, default 1]:{RESET} ").strip()
-    target_fmt = "cbz" if fmt_choice == "2" else "pdf"
-
-    recurse_in = input(f"{BOLD}Recurse into nested subfolders? [y/N]:{RESET} ").strip().lower()
-    recurse = recurse_in in ("y", "yes")
-
-    def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
-
-    try:
-        out_dir = folder.parent
-        if recurse:
-            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
-            print(f"\n{FG_GREEN}[✓] Batch complete! Created {len(created)} {target_fmt.upper()} archives in:{RESET}")
-            print(f"    {out_dir}")
-        else:
-            out_file = out_dir / f"{folder.name}.{target_fmt}"
-            if target_fmt == "cbz":
-                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
-            else:
-                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
-
-            if ok:
-                print(f"\n{FG_GREEN}[✓] Successfully created {target_fmt.upper()} ({count} pages):{RESET}")
-                print(f"    {out_file}")
-            else:
-                print(f"\n{FG_YELLOW}[!] No supported images found in: {folder}{RESET}")
-    except Exception as e:
-        print(f"\n{FG_RED}[-] Packaging failed: {e}{RESET}")
-
-    pause_prompt()
-
-
-def action_ocr(config: dict):
-    """Action: OCR Image to Text Extraction."""
-    from .ocr import run_ocr, is_tesseract_available, get_tesseract_install_hint
-
-    clear_screen()
-    show_cursor()
-
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
-    print(f"                 {BOLD}OCR — IMAGE TO TEXT EXTRACTOR{RESET}")
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-
-    if not is_tesseract_available():
-        print(f"{FG_YELLOW}[!] {get_tesseract_install_hint()}{RESET}\n")
-        pause_prompt()
-        return
-
-    print(f"{DIM}Enter an image file path, folder path, or multiple image paths.{RESET}\n")
-
-    try:
-        target_str = input(f"{BOLD}{FG_CYAN}Image or Folder Path:{RESET} ").strip().strip('"\'')
-    except (KeyboardInterrupt, EOFError):
-        return
-
-    if not target_str or target_str == "0":
-        return
-
-    target_path = Path(target_str)
-    if not target_path.exists():
-        print(f"\n{FG_RED}[-] Path not found: {target_path}{RESET}")
-        pause_prompt()
-        return
-
-    lang_in = input(f"{BOLD}Tesseract Language Code [default: eng]:{RESET} ").strip() or "eng"
-    combine_in = input(f"{BOLD}Combine into single .txt file? [Y/n]:{RESET} ").strip().lower()
-    combine = combine_in not in ("n", "no")
-
-    def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
-
-    try:
-        print(f"\n{BOLD}[+] Running OCR engine...{RESET}")
-        ok, out_path, preview = run_ocr(
-            target=target_path,
-            lang=lang_in,
-            combine_output=combine,
-            progress_callback=_progress,
-        )
-        print(f"\n{FG_GREEN}[✓] OCR Extraction Successful!{RESET}")
-        print(f"    Output: {out_path}\n")
-        if preview:
-            print("--- Extracted Text Preview ---")
-            print(preview[:500] + ("\n..." if len(preview) > 500 else ""))
-            print("------------------------------")
-    except Exception as e:
-        print(f"\n{FG_RED}[-] OCR failed: {e}{RESET}")
-
-    pause_prompt()
-
-
-def action_preview(config: dict):
-    """Action: Launch Web Stream Previewer."""
-    from .previewer import launch_web_previewer
-
-    clear_screen()
-    show_cursor()
-
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}")
-    print(f"                 {BOLD}WEB MEDIA & STREAM PREVIEWER{RESET}")
-    print(f"{BOLD}{FG_CYAN}============================================================={RESET}\n")
-
-    print(f"{DIM}Enter a video URL to pre-load, or press Enter to open player.{RESET}\n")
-
-    try:
-        url = input(f"{BOLD}{FG_CYAN}Video / Stream URL [optional]:{RESET} ").strip()
-    except (KeyboardInterrupt, EOFError):
-        return
-
-    print(f"\n[+] Opening Stream Previewer in browser...")
-    launch_web_previewer(url if url else None)
-    time.sleep(1.0)
-
-
 # ============================================================================
-# MAIN MENU LOOP
+# MAIN MENU CONTROLLER
 # ============================================================================
 
 def run_interactive_menu() -> int:
     """
     Main interactive dashboard controller.
-    Renders top banner, active state, and navigates seamlessly with arrows.
+    Consolidated, clean hierarchy with submenus and instant disk browser.
     """
     selected_index = 0
 
     options = [
-        ("📥", "Download Video", "Extract and download stream from any URL"),
-        ("🔄", "Convert Media", "Video to GIF, Audio, Text to PDF, Images"),
-        ("📚", "Comic / Image Scraper", "Scrape & download comic/manga chapters & galleries"),
-        ("📦", "Images to PDF / CBZ", "Bundle image folders into multi-page PDF or CBZ"),
-        ("🔍", "OCR (Image to Text)", "Extract text from images using Tesseract OCR"),
-        ("🌐", "Web Stream Previewer", "Instant browser media player & stream previewer"),
-        ("▶", "Open / Play Video", "Browse and launch downloaded videos"),
-        ("🗑", "Clear Selected Videos", "Interactive multi-select deletion checklist"),
-        ("💥", "Clear All Videos", "Wipe all downloaded video files from folder"),
-        ("📂", "Change Output Directory", "Update and save custom download location"),
-        ("⚙", "Settings & Config", "Adjust race timers, merge formats, and tiers"),
-        ("🚪", "Exit", "Close Video Extractor CLI"),
+        ("🎬", "Video Tools", "Download video stream, play, combine clips, directory, cleanup"),
+        ("🧰", "Other Tools & Utilities", "Media converter, comic scraper, PDF packager, OCR"),
+        ("⚙", "Settings & Preferences", "Manage per-tool output directories, engine options, history"),
+        ("🚪", "Exit", "Close Tool-Kit CLI"),
     ]
 
     hide_cursor()
@@ -1287,61 +2304,31 @@ def run_interactive_menu() -> int:
                     action_download(config, initial_url=target_url)
                 elif clip_text:
                     print(f"\n{FG_YELLOW}[!] Clipboard does not contain a valid http(s) URL.{RESET}")
-                    time.sleep(1.2)
+                    time.sleep(1.0)
                 else:
                     print(f"\n{FG_YELLOW}[!] Clipboard is empty or could not be accessed.{RESET}")
-                    time.sleep(1.2)
+                    time.sleep(1.0)
             elif key == "IGNORE":
                 pass
-            elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
+            elif key in ("1", "2", "3"):
                 num = int(key) - 1
-                if num < len(options):
-                    selected_index = num
-                    if num == 0:
-                        action_download(config)
-                    elif num == 1:
-                        action_convert(config)
-                    elif num == 2:
-                        action_comic_scraper(config)
-                    elif num == 3:
-                        action_pack_images(config)
-                    elif num == 4:
-                        action_ocr(config)
-                    elif num == 5:
-                        action_preview(config)
-                    elif num == 6:
-                        action_open(config)
-                    elif num == 7:
-                        action_clear_selected(config)
-                    elif num == 8:
-                        action_clear_all(config)
+                selected_index = num
+                if num == 0:
+                    action_video_tools(config)
+                elif num == 1:
+                    action_other_tools(config)
+                elif num == 2:
+                    action_settings_and_cleanup(config)
             elif key == "0":
-                selected_index = len(options) - 1
                 break
             elif key == "ENTER":
                 if selected_index == 0:
-                    action_download(config)
+                    action_video_tools(config)
                 elif selected_index == 1:
-                    action_convert(config)
+                    action_other_tools(config)
                 elif selected_index == 2:
-                    action_comic_scraper(config)
+                    action_settings_and_cleanup(config)
                 elif selected_index == 3:
-                    action_pack_images(config)
-                elif selected_index == 4:
-                    action_ocr(config)
-                elif selected_index == 5:
-                    action_preview(config)
-                elif selected_index == 6:
-                    action_open(config)
-                elif selected_index == 7:
-                    action_clear_selected(config)
-                elif selected_index == 8:
-                    action_clear_all(config)
-                elif selected_index == 9:
-                    action_change_directory(config)
-                elif selected_index == 10:
-                    action_settings(config)
-                elif selected_index == 11:
                     break
             elif key in ("q", "Q", "ESC"):
                 break
@@ -1351,7 +2338,6 @@ def run_interactive_menu() -> int:
     finally:
         show_cursor()
         clear_screen()
-        print(f"{FG_CYAN}Thank you for using Video Extractor!{RESET}\n")
+        print(f"{FG_CYAN}Thank you for using Tool-Kit CLI!{RESET}\n")
 
     return 0
-

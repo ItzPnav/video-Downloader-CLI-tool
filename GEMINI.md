@@ -1,24 +1,26 @@
-# GEMINI.md — Video Extractor
+# GEMINI.md — Tool-Kit CLI
 # Project memory for Antigravity AI Agent. Read this before touching ANY file.
 
 ---
 
 ## 1. PROJECT IDENTITY
 
-- **Name:** Video Extractor
-- **Type:** CLI Media Extractor Tool (Termux / Linux)
+- **Name:** Tool-Kit CLI
+- **Type:** CLI Media Extractor & Utility Toolkit (Termux / Linux / Windows / macOS)
 - **Author handle:** ItzPnav
 - **Current version:** 0.2.0
-- **Purpose:** Resilient command-line tool for Android (Termux) and Linux environments that inspects, extracts, and downloads online videos and adaptive streams from virtually any web URL.
+- **Purpose:** Resilient concurrent command-line media suite and utility toolkit for Android (Termux), Linux, and Windows that inspects, extracts, and downloads online streams, converts media formats, scrapes comics/mangas, archives image folders, and runs OCR text extraction.
 
 ---
 
 ## 2. FILE OWNERSHIP — WHO TOUCHES WHAT
 
 ```
-bin/video                                ← Executable shell launcher script for CLI
+bin/tools                                ← Primary executable shell launcher script for CLI
+bin/tools.bat                            ← Primary Windows batch script launcher
+bin/video                                ← Backward-compatibility shell launcher
+bin/video.bat                            ← Backward-compatibility Windows batch launcher
 bin/video-update                         ← Automated system and dependency updater script
-bin/video.bat                            ← Windows batch script launcher
 pyproject.toml                           ← PEP 621 Python package configuration and build metadata
 LICENSE                                  ← MIT License
 config/config.json                       ← Application configuration and user preferences
@@ -36,12 +38,16 @@ src/video_downloader/extractors/         ← Native extractor wrappers
 src/video_downloader/site_extractor.py   ← Native yt-dlp extraction wrapper and format selector
 src/video_downloader/static_scanner.py   ← HTML DOM, JSON-LD, and JS regex scanner using BeautifulSoup
 src/video_downloader/browser_scanner.py  ← Selenium + Headless Chromium network performance sniffer
+src/video_downloader/converter.py        ← FFmpeg & Pillow zero-bloat media converter
+src/video_downloader/comic_scraper.py    ← Comic and image gallery chapter scraper
+src/video_downloader/packager.py         ← Image folder to PDF / CBZ packager
+src/video_downloader/ocr.py              ← Tesseract OCR image-to-text extraction engine
 src/video_downloader/candidate.py        ← Media candidate model and scoring logic
 src/video_downloader/selector.py         ← Candidate ranking algorithm
 src/video_downloader/downloader.py       ← FFmpeg stream copying and download executor
 src/video_downloader/conflict_resolver.py← File collision detection and diff comparison
-src/video_downloader/menu.py             ← Interactive terminal menu and arrow navigation
-src/video_downloader/progress.py         ← Terminal spinner and progress bar renderer
+src/video_downloader/menu.py             ← Hierarchical terminal menu with disk browser
+src/video_downloader/progress.py         ← Flicker-free braille spinner and progress bar renderer
 src/video_downloader/utils.py            ← Configuration loading, filename sanitization, history logger
 README.md                                ← Always regenerate using README BUILDER rules in Section 7.
 ```
@@ -94,40 +100,44 @@ Download history lives in `config/history.json` as an array of download records:
 
 ## 5. TERMUX & LINUX RUNTIME HARD RULES
 
-1. **Executable Launchers** — All shell scripts in `bin/` must have executable permissions (`chmod +x bin/video bin/video-update`).
-2. **Environment & PATH** — The CLI launcher `bin/video` relies on `$SRC` environment variable pointing to `src/` and Python 3.
+1. **Executable Launchers** — All shell scripts in `bin/` must have executable permissions (`chmod +x bin/tools bin/video bin/video-update`).
+2. **Environment & PATH** — The CLI launchers `bin/tools` and `bin/video` rely on `$SRC` environment variable pointing to `src/` and Python 3.
 3. **Storage Access** — Target output directory default is `/sdcard/Download`. In Termux, `termux-setup-storage` must be granted.
-4. **Binary Dependencies** — Require `ffmpeg`, `python`, `yt-dlp`, and optional `chromium` / `chromedriver` in system PATH.
-5. **System-Wide CLI Availability** — `bin/video` is NOT automatically system-wide after cloning. Users must explicitly add `$HOME/video-Downloader-CLI-tool/bin` to PATH or create a symlink to `$PREFIX/bin/video`.
+4. **Binary Dependencies** — Require `ffmpeg`, `python`, `yt-dlp`, `tesseract`, and optional `chromium` / `chromedriver` in system PATH.
+5. **System-Wide CLI Availability** — `bin/tools` and `bin/video` are NOT automatically system-wide after cloning. Users must explicitly add `$HOME/toolkit-cli/bin` to PATH or create a symlink to `$PREFIX/bin/tools`.
 
 ---
 
-## 6. EXTRACTION ENGINE CONTRACTS
+## 6. DOMAIN LOGIC CONTRACTS
 
-### Concurrent Race Controller (`src/race_controller.py`)
+### Concurrent Race Controller (`src/video_downloader/race_controller.py`)
 - **Model:** Parallel LangGraph StateGraph connecting 4 simultaneous extractor agents feeding into a 'first successful result wins' reducer node.
 - **Winner Action:** Terminates all losing agent processes by PID immediately upon first winner above confidence threshold.
 - **Timeout:** Defaults to 20s (`--race-timeout`).
 
-### Scrapling Adaptive Scanner (`src/scrapling_scanner.py`)
+### Scrapling Adaptive Scanner (`src/video_downloader/scrapling_scanner.py`)
 - **Model:** Peer extraction agent alongside yt-dlp, static scanner, and browser sniffer.
 - **Fetching:** Fast plain HTTP (`Fetcher.get`) by default; escalates to `StealthyFetcher.fetch(headless=True)` if blocked.
 - **Parsing:** Adaptive selector DOM queries with auto-relocation, regex passes, and markdown clean-text fallback.
 
-### Native Site Extractor (`src/site_extractor.py`)
+### Native Site Extractor (`src/video_downloader/site_extractor.py`)
 - **Detection/entry condition:** Supported domains or site supported by yt-dlp.
 - **Key CLI tool:** `yt-dlp --dump-single-json`
 - **Output:** Native format selector (bv*+ba/b) and FFmpeg muxing.
 
-### Static HTML Scanner (`src/static_scanner.py`)
-- **Detection/entry condition:** Generic URLs or parallel peer in race.
-- **Key DOM/API:** BeautifulSoup parsing of `<video>`, `<iframe>`, `source`, `JSON-LD`, and JS string regex patterns.
-- **Inspection:** HTTP HEAD probing scoring.
+### Media Converter (`src/video_downloader/converter.py`)
+- **Pipelines:** Video to animated GIF (2-pass palettegen), Audio extraction (MP3 320k), Audio transcoder (WAV/FLAC/AAC/OGG), Text to PDF rendering, GIF to MP4, Remuxing, and Video Concatenation / Merge (`combine_videos` using fast zero-CPU concat demuxer with transcoding fallback).
 
-### Headless Browser Sniffer (`src/browser_scanner.py`)
-- **Detection/entry condition:** Parallel peer in race for JS-rendered streams.
-- **Key API:** Selenium Chrome performance logs (`Network.responseReceived`).
-- **Output:** Captures M3U8, MPD, MP4 network streams; aborts gracefully if Chromium/Chromedriver is missing.
+### Comic & Gallery Scraper (`src/video_downloader/comic_scraper.py`)
+- **Pipelines:** Multi-page chapter scraper with cookie support, anti-bot spoofing, and automatic bundling into PDF or CBZ.
+
+### OCR Engine (`src/video_downloader/ocr.py`)
+- **Pipelines:** Tesseract OCR image/folder text extraction with combined or separate transcript output.
+
+### Per-Tool Output Directories (`src/video_downloader/utils.py`)
+- **Isolation:** Each utility has its own dedicated output directory (`video` -> `download_directory`, `converter` -> `converter_output_directory`, `comic` -> `comic_output_directory`, `packager` -> `packager_output_directory`, `ocr` -> `ocr_output_directory`).
+- **Dynamic Defaults:** Sub-tools default to separate subfolders under base downloads (`Converted`, `Comics`, `Packaged`, `OCR`) rather than sharing a single flat folder.
+- **Auto-Separation:** `auto_separate_all_tool_dirs()` automatically configures and provisions all 5 dedicated directories.
 
 ---
 
@@ -155,7 +165,7 @@ Header → Overview → Architecture → Features → Tech Stack → Setup → P
 
 ## 8. WHAT NOT TO DO — HARD GUARDRAILS
 
-- **Never claim `bin/video` is automatically system-wide** — user must explicitly export PATH or create symlink.
+- **Never claim `bin/tools` or `bin/video` is automatically system-wide** — user must explicitly export PATH or create symlink.
 - **Never hardcode static pixel paths or external media dependencies** — rely on `shutil.which` and environment configuration.
 - **Never remove URL validation** — always enforce `http://` or `https://` protocol checks.
 - **Never swallow subprocess or FFmpeg errors silently** — display clear terminal diagnostics.
@@ -171,7 +181,7 @@ Header → Overview → Architecture → Features → Tech Stack → Setup → P
   - `[!]` Warning / Fallback notice
   - `[-]` Error message
 - **Python Conventions:** Clean modular imports, dataclasses for candidates and routes, explicit exception handling around network/subprocess calls.
-- **Dependencies:** Standard library + `requests`, `beautifulsoup4`, `yt-dlp`, `selenium`, `scrapling`, `langgraph`, `psutil`, `markdownify`.
+- **Dependencies:** Standard library + `requests`, `beautifulsoup4`, `yt-dlp`, `selenium`, `scrapling`, `langgraph`, `psutil`, `pillow`.
 
 ---
 
@@ -181,13 +191,15 @@ Header → Overview → Architecture → Features → Tech Stack → Setup → P
 |-------|-------|
 | Version | 0.2.0 |
 | Environment | Android (Termux) / Linux / Windows / macOS |
+| Primary Command | `tools` (Alias: `video`) |
 | Architecture | Concurrent Multi-Agent Race (LangGraph) |
 | Extraction Tiers | 4 (yt-dlp, Static HTML, Headless Chromium, Scrapling) |
+| Utilities | Media Converter, Comic Scraper, Image to PDF/CBZ, OCR Engine |
 | Storage Backend | JSON (`config/config.json`, `config/history.json`) |
 | Default Download Dir | `/sdcard/Download` |
-| Primary Engines | yt-dlp, Scrapling, BeautifulSoup, Selenium |
+| Primary Engines | yt-dlp, Scrapling, BeautifulSoup, Selenium, FFmpeg, Pillow, Tesseract |
 | Stream Transcoder | FFmpeg |
-| Main Entry Point | `bin/video` -> `src/main.py` |
+| Main Entry Point | `bin/tools` -> `src/main.py` |
 
 ---
 

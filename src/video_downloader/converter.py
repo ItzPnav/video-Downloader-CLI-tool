@@ -481,3 +481,138 @@ def remux_or_transcode_video(
         progress_callback(100, f"Saved: {output_path.name}")
 
     return output_path
+
+
+def combine_videos(
+    video_paths: list[str | Path],
+    output_path: str | Path,
+    reencode: bool = False,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Path:
+    """
+    Concatenate and merge multiple video files into a single unified video file.
+    Uses zero-CPU/RAM direct stream-copying (-f concat demuxer) by default,
+    falling back to FFmpeg concat filter re-encoding if video stream properties differ.
+    """
+    ffmpeg_exe = find_ffmpeg()
+    if not ffmpeg_exe:
+        raise RuntimeError("FFmpeg is required to combine videos. Please install FFmpeg.")
+
+    if not video_paths:
+        raise ValueError("At least one video file is required to combine.")
+
+    valid_paths = [Path(p).resolve() for p in video_paths]
+    for p in valid_paths:
+        if not p.is_file():
+            raise FileNotFoundError(f"Video file not found: {p}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Calculate total duration for progress tracking
+    total_duration = sum(get_media_duration(p) for p in valid_paths)
+
+    if progress_callback:
+        progress_callback(5, f"Preparing {len(valid_paths)} videos for merge...")
+
+    temp_list_file = None
+    try:
+        # Create concat demuxer list file
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as f:
+            temp_list_file = Path(f.name)
+            for p in valid_paths:
+                # Escape path for FFmpeg concat format
+                escaped_path = str(p).replace("'", "'\\''")
+                f.write(f"file '{escaped_path}'\n")
+
+        # Step 1: Attempt fast direct stream-copy concatenation (no CPU/RAM re-encoding)
+        if not reencode:
+            copy_cmd = [
+                ffmpeg_exe, "-y", "-v", "warning",
+                "-f", "concat", "-safe", "0",
+                "-i", str(temp_list_file),
+                "-c", "copy",
+                str(output_path),
+            ]
+
+            proc = subprocess.Popen(copy_cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
+            error_output = []
+            if proc.stderr:
+                for raw_line in proc.stderr:
+                    error_output.append(raw_line)
+                    if total_duration > 0:
+                        t = parse_ffmpeg_time(raw_line.strip())
+                        if t is not None:
+                            pct = int(min(max(t / total_duration, 0.0), 1.0) * 90)
+                            if progress_callback:
+                                progress_callback(pct, f"Fast stream copying: {pct}%")
+
+            proc.wait()
+            if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+                if progress_callback:
+                    progress_callback(100, f"Combined {len(valid_paths)} videos successfully!")
+                return output_path
+
+        # Step 2: Fallback to FFmpeg filter_complex concat transcoding if stream formats differ
+        if progress_callback:
+            progress_callback(20, "Stream formats differ — re-encoding video tracks...")
+
+        inputs_args = []
+        filter_inputs = []
+        for i, p in enumerate(valid_paths):
+            inputs_args.extend(["-i", str(p)])
+            filter_inputs.append(f"[{i}:v:0][{i}:a:0]")
+
+        filter_str = f"{''.join(filter_inputs)}concat=n={len(valid_paths)}:v=1:a=1[outv][outa]"
+        reencode_cmd = [
+            ffmpeg_exe, "-y", "-v", "warning",
+            *inputs_args,
+            "-filter_complex", filter_str,
+            "-map", "[outv]", "-map", "[outa]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "192k",
+            str(output_path),
+        ]
+
+        proc = subprocess.Popen(reencode_cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
+        err_lines = []
+        if proc.stderr:
+            for raw_line in proc.stderr:
+                err_lines.append(raw_line)
+                if total_duration > 0:
+                    t = parse_ffmpeg_time(raw_line.strip())
+                    if t is not None:
+                        pct = int(min(max(t / total_duration, 0.0), 1.0) * 90)
+                        if progress_callback:
+                            progress_callback(pct, f"Merging & encoding: {pct}%")
+
+        proc.wait()
+        if proc.returncode != 0:
+            # Try video-only concat if audio streams were missing
+            video_only_inputs = [f"[{i}:v:0]" for i in range(len(valid_paths))]
+            video_filter_str = f"{''.join(video_only_inputs)}concat=n={len(valid_paths)}:v=1:a=0[outv]"
+            video_only_cmd = [
+                ffmpeg_exe, "-y", "-v", "warning",
+                *inputs_args,
+                "-filter_complex", video_filter_str,
+                "-map", "[outv]",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                str(output_path),
+            ]
+            proc_vo = subprocess.run(video_only_cmd, capture_output=True, text=True)
+            if proc_vo.returncode != 0:
+                err_msg = "".join(err_lines[-5:]).strip() or proc_vo.stderr.strip()
+                raise RuntimeError(f"FFmpeg combine failed: {err_msg}")
+
+        if progress_callback:
+            progress_callback(100, f"Combined {len(valid_paths)} videos successfully!")
+
+        return output_path
+
+    finally:
+        if temp_list_file and temp_list_file.exists():
+            try:
+                temp_list_file.unlink()
+            except Exception:
+                pass
+

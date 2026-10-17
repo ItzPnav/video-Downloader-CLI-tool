@@ -210,26 +210,16 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
     if is_direct_video:
         try:
             if download_parallel_stream(candidate.url, resolved_path):
-                print()
-                print("========================================")
-                print("[SUCCESS] Parallel download complete")
-                print("========================================")
-                print(output)
                 return output
-        except Exception as parallel_err:
-            print(f"[!] Parallel download fallback to FFmpeg: {parallel_err}")
+        except Exception:
+            pass
 
-    print()
-    print("[+] Downloader (FFmpeg)")
-    print(f"[+] Type : {candidate.label}")
-    print(f"[+] Source: {candidate.source}")
-    print(f"[+] URL  : {candidate.url}")
-    print(f"[+] Save : {output}")
-    print()
-
+    ffmpeg_exe = find_ffmpeg() or "ffmpeg"
     command = [
-        "ffmpeg",
+        ffmpeg_exe,
         "-y",
+        "-v", "error",
+        "-stats",
         "-i",
         candidate.url,
         "-c",
@@ -237,18 +227,48 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
         output,
     ]
 
-    subprocess.run(
-        command,
-        check=True,
-    )
+    from .progress import DownloadProgress
+    progress = DownloadProgress()
+    print(f"\n  \033[96m▶\033[0m {Path(output).stem}")
+    print(f"    \033[2mFolder: {Path(output).parent}\033[0m")
+    try:
+        progress.start()
 
-    print()
-    print("========================================")
-    print("[SUCCESS] Download complete")
-    print("========================================")
-    print(output)
+        proc = subprocess.Popen(
+            command,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
 
-    return output
+        if proc.stderr:
+            for raw_line in proc.stderr:
+                line = raw_line.strip()
+                # Parse size=   1234kB time=00:01:23.45 bitrate= 123.4kbits/s speed=4.5x
+                if "size=" in line or "time=" in line:
+                    try:
+                        # Estimate bytes from size=
+                        size_match = re.search(r"size=\s*(\d+)(kB|MB|B)", line)
+                        if size_match:
+                            num = float(size_match.group(1))
+                            unit = size_match.group(2)
+                            mult = 1024 if unit == "kB" else (1024 * 1024 if unit == "MB" else 1)
+                            dl_bytes = int(num * mult)
+                            progress.update(dl_bytes)
+                    except Exception:
+                        pass
+
+        proc.wait()
+        if proc.returncode != 0:
+            progress.stop()
+            raise RuntimeError(f"FFmpeg stream download failed with exit code {proc.returncode}")
+
+        final_size = resolved_path.stat().st_size if resolved_path.is_file() else None
+        progress.complete(final_size)
+        return output
+    finally:
+        progress.stop()
 
 
 def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeout: int = 20) -> bool:
@@ -259,6 +279,7 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
     import threading
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import requests
+    from .progress import DownloadProgress
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -273,11 +294,16 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
             return False
 
         total_bytes = int(content_length)
-        # Only use parallel download if file is larger than 2MB
         if total_bytes < 2 * 1024 * 1024:
             return False
 
-        print(f"[+] Accelerated Parallel Downloader ({threads} threads, {total_bytes / (1024*1024):.1f} MB)")
+        dest_path = Path(dest_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        part_all = dest_path.with_suffix(dest_path.suffix + ".partall")
+
+        progress = DownloadProgress()
+        print(f"\n  \033[96m▶\033[0m {dest_path.stem}")
+
         part_size = total_bytes // threads
         ranges = []
         for i in range(threads):
@@ -286,11 +312,11 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
             ranges.append((start, end))
 
         temp_parts = []
-        dest_path = Path(dest_path)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        part_all = dest_path.with_suffix(dest_path.suffix + ".partall")
+        downloaded_lock = threading.Lock()
+        downloaded_bytes = 0
 
         def _fetch_range(idx: int, start: int, end: int) -> Path:
+            nonlocal downloaded_bytes
             part_file = dest_path.with_suffix(f"{dest_path.suffix}.part{idx}")
             temp_parts.append(part_file)
             req_h = dict(headers)
@@ -301,6 +327,9 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
                     for chunk in r.iter_content(chunk_size=64 * 1024):
                         if chunk:
                             pf.write(chunk)
+                            with downloaded_lock:
+                                downloaded_bytes += len(chunk)
+                                progress.render(downloaded_bytes, total_bytes)
             return part_file
 
         with ThreadPoolExecutor(max_workers=threads) as executor:
@@ -322,6 +351,7 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
                     p_file.unlink(missing_ok=True)
                 except Exception:
                     pass
+            progress.complete(total_bytes)
             return True
 
     except Exception:

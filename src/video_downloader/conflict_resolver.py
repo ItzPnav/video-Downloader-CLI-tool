@@ -4,6 +4,7 @@ Provides Windows-style Replace / Keep Both / Skip / Compare Info workflows.
 """
 
 import os
+import re
 import sys
 import json
 import shutil
@@ -44,6 +45,7 @@ def generate_unique_path(target_path: Path) -> Path:
     """
     Generate non-colliding path using standard OS numbering:
     e.g. video.mp4 -> video (1).mp4 -> video (2).mp4
+    e.g. video (1).mp4 -> video (2).mp4 (properly incrementing existing counter)
     """
     if not target_path.exists():
         return target_path
@@ -52,9 +54,17 @@ def generate_unique_path(target_path: Path) -> Path:
     stem = target_path.stem
     suffix = target_path.suffix
 
-    counter = 1
+    m = re.match(r"^(.*?)\s*\((\d{1,4})\)$", stem)
+    if m:
+        base_stem = m.group(1).rstrip()
+        start_counter = int(m.group(2)) + 1
+    else:
+        base_stem = stem
+        start_counter = 1
+
+    counter = start_counter
     while True:
-        candidate_path = parent / f"{stem} ({counter}){suffix}"
+        candidate_path = parent / f"{base_stem} ({counter}){suffix}"
         if not candidate_path.exists():
             return candidate_path
         counter += 1
@@ -195,7 +205,18 @@ def resolve_file_conflict(
     if not target_path.exists():
         return target_path
 
-    # Check command-line override policies
+    # Fall back to persistent config if no CLI override passed
+    if conflict_policy is None or conflict_policy == "ask":
+        try:
+            from .utils import load_config
+            cfg = load_config()
+            configured_policy = cfg.get("conflict_policy")
+            if configured_policy and configured_policy != "ask":
+                conflict_policy = configured_policy
+        except Exception:
+            pass
+
+    # Check override policies
     if conflict_policy == "replace":
         print(f"[!] Target file exists. Overwriting as requested: {target_path.name}")
         return target_path
@@ -227,7 +248,7 @@ def resolve_file_conflict(
     ]
 
     selected_index = 0
-    show_diff_mode = False
+    show_diff_mode = (conflict_policy == "compare")
     hide_cursor()
 
     try:

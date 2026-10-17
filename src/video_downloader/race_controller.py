@@ -208,33 +208,37 @@ class ExtractionRaceController:
         )
         self.launched_processes[tier] = proc
         self.spawned_pids[tier] = proc.pid
-        print(f"[+] Spawning agent [{tier}] (PID: {proc.pid})...")
+        if self.prefer_gui:
+            print(f"[+] Spawning agent [{tier}] (PID: {proc.pid})...")
         return proc
 
     def _spawn_all_tiers(self) -> None:
         """Spawn all immediate tier agents concurrently."""
         for tier in self.immediate_tiers:
             self._spawn_single_tier(tier)
-        if self.deferred_tiers:
+        if self.deferred_tiers and self.prefer_gui:
             print(f"[+] Deferred tier [browser] held in standby (grace: {self.browser_grace_seconds:.1f}s)...")
 
     def _run_race_reducer(self, state: RaceState) -> dict:
         """
         Reducer implementation: polls for the first candidate >= confidence threshold,
         adaptively escalates to deferred tiers if grace timer expires,
-        renders single-terminal status display, and terminates losing processes by PID.
+        renders single-terminal status display with smooth spinner, and terminates losing processes by PID.
         """
         winner_tier: Optional[str] = None
         winning_candidate: Optional[Candidate] = None
         timed_out = False
 
-        poll_interval = 0.12
+        poll_interval = 0.08
         deadline = self._start_time + self.timeout
         is_interactive = sys.stdout.isatty() and not self.prefer_gui
 
         tier_statuses: dict[str, str] = {t: "running" for t in self.immediate_tiers}
         for t in self.deferred_tiers:
             tier_statuses[t] = f"standby ({self.browser_grace_seconds:.1f}s)"
+
+        spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        frame_idx = 0
 
         while time.time() < deadline:
             elapsed = time.time() - self._start_time
@@ -275,13 +279,11 @@ class ExtractionRaceController:
                 )
 
                 if elapsed >= self.browser_grace_seconds or all_immediate_finished:
-                    if is_interactive:
-                        sys.stdout.write("\r\033[K")
-                        sys.stdout.flush()
-                    if all_immediate_finished and elapsed < self.browser_grace_seconds:
-                        print(f"[!] Fast tiers finished without qualifying media — releasing browser agent early...")
-                    else:
-                        print(f"[+] Grace timer elapsed ({self.browser_grace_seconds:.1f}s) — releasing browser agent...")
+                    if self.prefer_gui:
+                        if all_immediate_finished and elapsed < self.browser_grace_seconds:
+                            print(f"[!] Fast tiers finished without qualifying media — releasing browser agent early...")
+                        else:
+                            print(f"[+] Grace timer elapsed ({self.browser_grace_seconds:.1f}s) — releasing browser agent...")
                     self._spawn_single_tier("browser")
                     tier_statuses["browser"] = "running"
 
@@ -304,15 +306,15 @@ class ExtractionRaceController:
                 if is_interactive:
                     sys.stdout.write("\r\033[K")
                     sys.stdout.flush()
-                print("[!] All extraction agents completed without finding qualifying media.")
+                print("  \033[93m[!]\033[0m All extraction agents completed without finding qualifying media.")
                 break
 
-            # Render inline single-terminal status ticker
+            # Render inline single-terminal status ticker with spinner
             if is_interactive:
-                status_parts = [f"{t}: {tier_statuses.get(t, 'running')}" for t in self.active_tiers]
-                line = f"\r[+] Racing ({elapsed:.1f}s / {self.timeout:.0f}s) | " + " | ".join(status_parts)
-                if len(line) > 120:
-                    line = line[:117] + "..."
+                frame = spinner_frames[frame_idx % len(spinner_frames)]
+                frame_idx += 1
+                tier_list = ", ".join(self.active_tiers)
+                line = f"\r  \033[96m{frame}\033[0m Racing extraction engines [{tier_list}] ({elapsed:.1f}s)..."
                 sys.stdout.write(line + "\033[K")
                 sys.stdout.flush()
 
@@ -326,34 +328,35 @@ class ExtractionRaceController:
 
         if winner_tier is None and time.time() >= deadline:
             timed_out = True
-            print(f"\n[!] Race timed out after {self.timeout:.1f}s with no winner.")
+            print(f"  \033[93m[!]\033[0m Extraction race timed out after {self.timeout:.1f}s with no qualifying media.")
 
         # Handle termination based on race outcome
         if winner_tier and winning_candidate:
-            print()
-            print("=" * 60)
-            print(f"[✓] Agent [{winner_tier}] won the race in {duration_ms}ms! (Score: {winning_candidate.score})")
-            print("=" * 60)
+            print(f"  \033[92m[✓]\033[0m Stream detected via \033[1m{winner_tier}\033[0m ({duration_ms / 1000:.1f}s)")
 
             for tier, handle in self.launched_processes.items():
                 if tier != winner_tier:
                     target_pid = handle.get_actual_pid()
-                    print(f"[+] Terminating losing agent [{tier}] (PID: {target_pid})...")
+                    if self.prefer_gui:
+                        print(f"[+] Terminating losing agent [{tier}] (PID: {target_pid})...")
                     handle.kill()
                     kill_process_by_pid(target_pid)
-                    print(f"[✓] Successfully killed PID: {target_pid}")
+                    if self.prefer_gui:
+                        print(f"[✓] Successfully killed PID: {target_pid}")
                     self.killed_pids.append(target_pid)
                 else:
                     # Cleanly reap the winning process
                     handle.reap(timeout=1.0)
 
         elif timed_out:
-            print("[+] Terminating all running agent processes due to timeout...")
+            if self.prefer_gui:
+                print("[+] Terminating all running agent processes due to timeout...")
             for tier, handle in self.launched_processes.items():
                 target_pid = handle.get_actual_pid()
                 handle.kill()
                 kill_process_by_pid(target_pid)
-                print(f"[✓] Killed PID: {target_pid} ({tier})")
+                if self.prefer_gui:
+                    print(f"[✓] Killed PID: {target_pid} ({tier})")
                 self.killed_pids.append(target_pid)
         else:
             # Reaping processes if all finished with failure
@@ -415,18 +418,19 @@ class ExtractionRaceController:
         if not self.immediate_tiers and self.deferred_tiers:
             self.immediate_tiers = list(self.deferred_tiers)
             self.deferred_tiers = []
-        print()
-        print("=" * 60)
-        print("           CONCURRENT MULTI-AGENT EXTRACTION RACE")
-        print(f"  URL       : {self.url}")
-        print(f"  Agents ({len(self.active_tiers)}): {', '.join(self.active_tiers)}")
-        if self.deferred_tiers:
-            print(f"  Deferred  : {', '.join(self.deferred_tiers)} (grace: {self.browser_grace_seconds:.1f}s)")
-        print(f"  Mode      : {'External Windows' if self.prefer_gui else 'Single Terminal (Background)'}")
-        print(f"  Timeout   : {self.timeout:.1f}s")
-        print(f"  Threshold : Score >= {self.confidence_threshold}")
-        print("=" * 60)
-        print()
+        if self.prefer_gui:
+            print()
+            print("=" * 60)
+            print("           CONCURRENT MULTI-AGENT EXTRACTION RACE")
+            print(f"  URL       : {self.url}")
+            print(f"  Agents ({len(self.active_tiers)}): {', '.join(self.active_tiers)}")
+            if self.deferred_tiers:
+                print(f"  Deferred  : {', '.join(self.deferred_tiers)} (grace: {self.browser_grace_seconds:.1f}s)")
+            print(f"  Mode      : External Windows")
+            print(f"  Timeout   : {self.timeout:.1f}s")
+            print(f"  Threshold : Score >= {self.confidence_threshold}")
+            print("=" * 60)
+            print()
 
         if not self.active_tiers:
             print("[-] No extraction agents enabled for the race.")

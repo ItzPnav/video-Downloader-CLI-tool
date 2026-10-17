@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 import subprocess
@@ -169,9 +170,15 @@ def download(
         "video"
     )
 
+    display_title = Path(output_path).stem if output_path else title
+    display_dir = Path(output_path).parent if output_path else download_dir
+
     print()
     print(
-        f"  ▶ {title}"
+        f"  ▶ {display_title}"
+    )
+    print(
+        f"    \033[2mFolder: {display_dir}\033[0m"
     )
 
     if requested_quality:
@@ -272,111 +279,68 @@ def download(
     ]
 
     progress = DownloadProgress()
-
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-
     last_downloaded = 0
 
     try:
+        progress.start()
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
 
         for raw_line in process.stdout:
-
             line = raw_line.strip()
-
-            if not line.startswith(
-                "download:"
-            ):
+            if not line.startswith("download:"):
                 continue
 
             try:
-
-                values = line[
-                    len("download:"):
-                ].split("|")
-
-                downloaded = int(
-                    values[0]
-                )
-
-                total = (
-                    int(values[1])
-                    if values[1]
-                    and values[1] != "NA"
-                    else None
-                )
-
-                speed = None
-
-                if values[2] not in (
-                    "",
-                    "NA",
-                    "None"
-                ):
-
-                    try:
-                        speed = float(
-                            values[2]
-                        )
-                    except ValueError:
-                        pass
-
-                eta = None
-
-                if values[3] not in (
-                    "",
-                    "NA",
-                    "None"
-                ):
-
-                    try:
-                        eta = int(
-                            float(values[3])
-                        )
-                    except ValueError:
-                        pass
-
+                values = line[len("download:"):].split("|")
+                downloaded = int(values[0])
+                total = int(values[1]) if values[1] and values[1] != "NA" else None
+                speed = float(values[2]) if values[2] not in ("", "NA", "None") else None
+                eta = int(float(values[3])) if values[3] not in ("", "NA", "None") else None
                 last_downloaded = downloaded
-
-                progress.render(
-                    downloaded,
-                    total,
-                    speed,
-                    eta
-                )
-
+                progress.update(downloaded, total, speed, eta)
             except Exception:
                 continue
 
         return_code = process.wait()
 
+        if return_code != 0:
+            progress.stop()
+            print()
+            print("  \033[91m✗ Download failed.\033[0m")
+            return False
+
+        if last_downloaded == 0:
+            if output_path and Path(output_path).is_file():
+                last_downloaded = Path(output_path).stat().st_size
+            else:
+                mp4s = list(download_dir.glob("*.mp4"))
+                if mp4s:
+                    latest = max(mp4s, key=lambda p: p.stat().st_mtime)
+                    last_downloaded = latest.stat().st_size
+
+        progress.complete(last_downloaded if last_downloaded > 0 else None)
+        return True
+
     except KeyboardInterrupt:
-
+        progress.stop()
         print()
-        print(
-            "\n  ! Download cancelled."
-        )
-
-        process.terminate()
-
+        print("\n  ! Download cancelled.")
+        try:
+            process.terminate()
+        except Exception:
+            pass
         return False
-
-    if return_code != 0:
-
-        print()
-        print(
-            "  ✗ Download failed."
-        )
-
-        return False
-
-    progress.complete(
-        last_downloaded
-    )
-
-    return True
+    except Exception as e:
+        progress.stop()
+        raise e
+    finally:
+        progress.stop()

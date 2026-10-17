@@ -173,5 +173,78 @@ class TestMenu(unittest.TestCase):
                     self.assertEqual(key, "URL:https://test.com")
 
 
+class TestToolDirectories(unittest.TestCase):
+    """Unit tests for dedicated, independent per-tool output directory management."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_distinct_default_directories_per_tool(self):
+        """Verify each tool resolves to a distinct dedicated directory by default."""
+        from video_downloader.utils import get_tool_output_dir, get_download_dir
+
+        with patch("video_downloader.utils.get_download_dir", return_value=self.base_dir):
+            mock_cfg = {"download_directory": str(self.base_dir)}
+            v_dir = get_tool_output_dir("video", mock_cfg)
+            c_dir = get_tool_output_dir("converter", mock_cfg)
+            cm_dir = get_tool_output_dir("comic", mock_cfg)
+            p_dir = get_tool_output_dir("packager", mock_cfg)
+            o_dir = get_tool_output_dir("ocr", mock_cfg)
+
+            # Check that each sub-tool directory ends with its dedicated name
+            self.assertEqual(c_dir.name, "Converted")
+            self.assertEqual(cm_dir.name, "Comics")
+            self.assertEqual(p_dir.name, "Packaged")
+            self.assertEqual(o_dir.name, "OCR")
+
+            # Check that all non-video directories are unique
+            dirs = [v_dir, c_dir, cm_dir, p_dir, o_dir]
+            self.assertEqual(len(set(dirs)), 5, "All tool output directories must be distinct")
+
+    def test_per_tool_custom_directory_persistence(self):
+        """Verify setting a custom directory for one tool does not affect other tools."""
+        from video_downloader.utils import get_tool_output_dir, set_tool_output_dir
+
+        with patch("video_downloader.utils.get_config_dir", return_value=self.base_dir):
+            custom_comic = self.base_dir / "SpecialComics"
+            custom_ocr = self.base_dir / "Transcripts"
+
+            set_tool_output_dir("comic", custom_comic)
+            set_tool_output_dir("ocr", custom_ocr)
+
+            loaded_comic = get_tool_output_dir("comic")
+            loaded_ocr = get_tool_output_dir("ocr")
+            loaded_converter = get_tool_output_dir("converter")
+
+            self.assertEqual(loaded_comic, custom_comic.resolve())
+            self.assertEqual(loaded_ocr, custom_ocr.resolve())
+            self.assertNotEqual(loaded_comic, loaded_converter)
+            self.assertNotEqual(loaded_ocr, loaded_converter)
+
+    def test_auto_separate_all_tool_dirs(self):
+        """Verify auto_separate_all_tool_dirs creates dedicated subfolders for all tools."""
+        from video_downloader.utils import auto_separate_all_tool_dirs
+
+        with patch("video_downloader.utils.get_config_dir", return_value=self.base_dir):
+            result = auto_separate_all_tool_dirs(self.base_dir, create_video_subfolder=True)
+
+            self.assertIn("video", result)
+            self.assertIn("converter", result)
+            self.assertIn("comic", result)
+            self.assertIn("packager", result)
+            self.assertIn("ocr", result)
+
+            for tool, path in result.items():
+                self.assertTrue(path.exists(), f"Directory for {tool} must exist on disk")
+
+            # All 5 paths must be completely distinct
+            self.assertEqual(len(set(result.values())), 5)
+
+
 if __name__ == "__main__":
     unittest.main()
+

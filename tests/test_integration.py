@@ -57,44 +57,60 @@ class TestIntegration(unittest.TestCase):
         r3 = identify("https://example.com/video/page")
         self.assertEqual(r3.platform, "generic")
 
-    @patch("subprocess.run")
-    def test_downloader_ffmpeg_execution(self, mock_subproc):
-        mock_subproc.return_value = MagicMock(returncode=0)
+    @patch("video_downloader.downloader.get_download_dir")
+    @patch("video_downloader.downloader.ensure_environment")
+    @patch("subprocess.Popen")
+    def test_downloader_ffmpeg_execution(self, mock_subproc, mock_env, mock_dl_dir):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dl_dir.return_value = Path(tmpdir)
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stderr = []
+            mock_proc.wait.return_value = 0
+            mock_subproc.return_value = mock_proc
 
-        candidate = Candidate(
-            url="https://example.com/test_stream.m3u8",
-            source="scrapling",
-            extension=".m3u8",
-            mime_type="application/x-mpegURL",
-            score=100,
-            metadata={"title": "Integration Test Video"}
-        )
+            candidate = Candidate(
+                url="https://example.com/test_stream.m3u8",
+                source="scrapling",
+                extension=".m3u8",
+                mime_type="application/x-mpegURL",
+                score=100,
+                metadata={"title": "Integration Test Video"}
+            )
 
-        output_path = download(candidate, filename="custom_name")
-        self.assertTrue(output_path.endswith(".mp4"))
-        mock_subproc.assert_called_once()
-        cmd_args = mock_subproc.call_args[0][0]
-        self.assertEqual(cmd_args[0], "ffmpeg")
-        self.assertIn("https://example.com/test_stream.m3u8", cmd_args)
-        self.assertIn("-c", cmd_args)
-        self.assertIn("copy", cmd_args)
+            output_path = download(candidate, filename="custom_name")
+            self.assertTrue(output_path.endswith(".mp4"))
+            mock_subproc.assert_called_once()
+            cmd_args = mock_subproc.call_args[0][0]
+            self.assertTrue(cmd_args[0].lower().endswith(("ffmpeg", "ffmpeg.exe")))
+            self.assertIn("https://example.com/test_stream.m3u8", cmd_args)
+            self.assertIn("-c", cmd_args)
+            self.assertIn("copy", cmd_args)
 
+    @patch("video_downloader.downloader.get_download_dir")
+    @patch("video_downloader.downloader.ensure_environment")
     @patch("video_downloader.site_extractor.download")
-    def test_downloader_ytdlp_execution(self, mock_ytdlp_dl):
-        mock_ytdlp_dl.return_value = True
+    def test_downloader_ytdlp_execution(self, mock_ytdlp_dl, mock_env, mock_dl_dir):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_dl_dir.return_value = Path(tmpdir)
+            mock_ytdlp_dl.return_value = True
 
-        candidate = Candidate(
-            url="https://example.com/watch?v=abc",
-            source="ytdlp",
-            score=100,
-            metadata={"title": "YTDLP Video", "engine": "ytdlp"}
-        )
+            candidate = Candidate(
+                url="https://example.com/watch?v=abc",
+                source="ytdlp",
+                score=100,
+                metadata={"title": "YTDLP Video", "engine": "ytdlp"}
+            )
 
-        output_path = download(candidate, filename="ytdlp_name", requested_quality="720p")
-        self.assertIsNotNone(output_path)
-        mock_ytdlp_dl.assert_called_once_with("https://example.com/watch?v=abc", "720p")
-        # Ensure it returns an mp4 filepath, not a directory
-        self.assertTrue(output_path.endswith(".mp4"))
+            output_path = download(candidate, filename="ytdlp_name", requested_quality="720p")
+            self.assertIsNotNone(output_path)
+            mock_ytdlp_dl.assert_called_once_with("https://example.com/watch?v=abc", "720p")
+            # Ensure it returns an mp4 filepath, not a directory
+            self.assertTrue(output_path.endswith(".mp4"))
+
+
 
 
 if __name__ == "__main__":

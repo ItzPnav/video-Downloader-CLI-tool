@@ -9,9 +9,15 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 VERSION_PATH = ROOT / "VERSION"
 
+
+def is_termux() -> bool:
+    """Check if the current runtime environment is Android Termux."""
+    return "com.termux" in os.environ.get("PREFIX", "") or Path("/data/data/com.termux").exists()
+
+
 DEFAULT_CONFIG = {
     "version": "0.2.0",
-    "download_directory": "/sdcard/Download" if Path("/sdcard").exists() else str(Path.home() / "Downloads"),
+    "download_directory": "/sdcard/Download" if is_termux() else str(Path.home() / "Downloads"),
     "preferred_format": "bv*+ba/b",
     "merge_format": "mp4",
     "browser_wait_seconds": 8,
@@ -116,7 +122,7 @@ def get_download_dir() -> Path:
 
         # On Windows/Linux non-Termux, convert /sdcard/Download to user's Downloads directory
         if str(target).startswith(("/sdcard", "\\sdcard")):
-            if not Path("/sdcard").exists():
+            if sys.platform == "win32" or not is_termux():
                 fallback = Path.home() / "Downloads"
                 fallback.mkdir(parents=True, exist_ok=True)
                 return fallback
@@ -138,7 +144,7 @@ def get_download_dir() -> Path:
             pass
 
     # Default fallback
-    if Path("/sdcard").exists():
+    if is_termux() and Path("/sdcard").exists():
         sdcard = Path("/sdcard/Download")
         sdcard.mkdir(parents=True, exist_ok=True)
         return sdcard
@@ -146,6 +152,115 @@ def get_download_dir() -> Path:
     default_dir = Path.home() / "Downloads"
     default_dir.mkdir(parents=True, exist_ok=True)
     return default_dir
+
+
+TOOL_DIR_KEYS = {
+    "video": "download_directory",
+    "download": "download_directory",
+    "converter": "converter_output_directory",
+    "comic": "comic_output_directory",
+    "packager": "packager_output_directory",
+    "ocr": "ocr_output_directory",
+}
+
+TOOL_DEFAULT_SUBDIRS = {
+    "video": "",
+    "download": "",
+    "converter": "Converted",
+    "comic": "Comics",
+    "packager": "Packaged",
+    "ocr": "OCR",
+}
+
+
+def get_tool_default_dir(tool_name: str, base_dir: Path = None) -> Path:
+    """
+    Get the distinct default output directory for a specific tool.
+    Subfolders (Converted, Comics, Packaged, OCR) are resolved under base_dir.
+    """
+    base = base_dir or get_download_dir()
+    sub = TOOL_DEFAULT_SUBDIRS.get(tool_name.lower(), "")
+    target = (base / sub) if sub else base
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return target
+
+
+def get_tool_output_dir(tool_name: str, config: dict = None) -> Path:
+    """
+    Get the configured custom output directory for a specific tool.
+    If not explicitly set in config, defaults to a distinct tool-specific directory.
+    """
+    if config is None:
+        config = load_config()
+
+    key = TOOL_DIR_KEYS.get(tool_name.lower(), "download_directory")
+    custom_dir = config.get(key)
+
+    if custom_dir:
+        p = Path(custom_dir)
+        try:
+            if not p.is_absolute():
+                p = (ROOT / p).resolve()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except Exception:
+            pass
+
+    return get_tool_default_dir(tool_name)
+
+
+def set_tool_output_dir(tool_name: str, new_path: str | Path) -> bool:
+    """
+    Save custom output directory for a specific tool in configuration.
+    """
+    config = load_config()
+    key = TOOL_DIR_KEYS.get(tool_name.lower(), "download_directory")
+    config[key] = str(Path(new_path).resolve())
+    return save_config(config)
+
+
+def auto_separate_all_tool_dirs(base_dir: str | Path = None, create_video_subfolder: bool = False) -> dict:
+    """
+    Configure and initialize dedicated distinct directories for all tools under a base directory.
+    Returns a dict mapping tool names to their resolved Paths.
+    """
+    if base_dir is None:
+        base = get_download_dir()
+    else:
+        base = Path(base_dir).resolve()
+
+    config = load_config()
+    result = {}
+
+    # Video tool
+    vid_path = (base / "Videos") if create_video_subfolder else base
+    vid_path.mkdir(parents=True, exist_ok=True)
+    config["download_directory"] = str(vid_path)
+    result["video"] = vid_path
+
+    # Sub-tools
+    for tool, sub in TOOL_DEFAULT_SUBDIRS.items():
+        if tool in ("video", "download"):
+            continue
+        key = TOOL_DIR_KEYS[tool]
+        t_path = base / sub
+        t_path.mkdir(parents=True, exist_ok=True)
+        config[key] = str(t_path)
+        result[tool] = t_path
+
+    save_config(config)
+    return result
+
+
+def reset_all_tool_dirs_to_defaults() -> dict:
+    """
+    Reset all tool output directories back to distinct default subfolders under system Downloads.
+    """
+    default_base = Path("/sdcard/Download") if Path("/sdcard").exists() else (Path.home() / "Downloads")
+    return auto_separate_all_tool_dirs(default_base, create_video_subfolder=False)
 
 
 def get_version() -> str:

@@ -397,43 +397,46 @@ def open_video_picker():
 def show_help():
 
     print("=" * 60)
-    print("                 VIDEO EXTRACTOR")
+    print("                 TOOL-KIT CLI")
     print("=" * 60)
     print()
     print(f"Version: {get_version()}")
     print()
     print("Usage:")
-    print('  video "URL" [options]')
-    print('  video convert <input> --to <format> [options]')
-    print('  video comic <url_or_file> [options]')
-    print('  video pack <folder> --to <pdf|cbz> [options]')
-    print('  video ocr <image_or_folder> [options]')
-    print('  video preview [url_or_file]')
+    print('  tools                    Interactive dashboard & navigation menu')
+    print('  tools "URL" [options]    Extract and download video / media stream')
+    print('  tools convert <file> --to <format> [options]')
+    print('  tools combine <v1> <v2>.. [--out <path>] [--reencode]')
+    print('  tools comic <url_or_file> [options]')
+    print('  tools pack <folder> --to <pdf|cbz> [options]')
+    print('  tools ocr <image_or_folder> [options]')
+    print('  (Alias: "video" command works identically)')
     print()
     print("Commands:")
-    print("  video                    Interactive terminal navigation menu")
-    print('  video "URL"              Extract and download media')
-    print("  video convert <file>     Convert media (video->gif, audio, images, text->pdf)")
-    print("  video comic <url/file>   Scrape & download comic/image gallery chapters")
-    print("  video pack <folder>      Bundle image folders into multi-page PDF or CBZ")
-    print("  video ocr <img/folder>   Extract text from images using Tesseract OCR")
-    print("  video preview [url/file] Launch instant browser media player / stream previewer")
+    print("  tools                    Open interactive terminal menu")
+    print('  tools "URL"              Extract and download media from any URL')
+    print("  tools convert <file>     Convert media (video->gif, audio, images, text->pdf)")
+    print("  tools combine <files..>  Concatenate & merge multiple video clips into one file")
+    print("  tools comic <url/file>   Scrape & download comic/image gallery chapters")
+    print("  tools pack <folder>      Bundle image folders into multi-page PDF or CBZ")
+    print("  tools ocr <img/folder>   Extract text from images using Tesseract OCR")
     print("  --menu                   Open interactive terminal menu")
     print("  --help                   Show help")
     print("  --version                Show version")
     print("  --history                Show download history")
-    print("  --update                 Update extractor")
+    print("  --update                 Update toolkit")
     print("  --clean                  Delete downloaded videos")
     print("  --open                   Choose and play a video")
+
     print()
-    print("Conversion Options (video convert):")
+    print("Conversion Options (tools convert):")
     print("  --to <format>            Target format (gif, mp3, mp4, wav, flac, aac, png, jpg, pdf)")
     print("  --fps 30                 Frames per second for GIF (default: 30)")
     print("  --res 504p|480p|360p     Height resolution for GIF (default: 504p)")
     print("  --quality high|med|low   Color palette quality for GIF (default: high)")
     print("  --out <path>             Custom output path or directory")
     print()
-    print("Comic / Packaging Options:")
+    print("Comic / Packaging Options (tools comic, tools pack):")
     print("  --pdf                    Auto-bundle into PDF")
     print("  --cbz                    Auto-bundle into Comic Book Zip (CBZ)")
     print("  --cookies <file.txt>     Supply Netscape cookies.txt for login/age-gates")
@@ -441,7 +444,7 @@ def show_help():
     print("  --recurse                Recursively process nested subfolders (for pack)")
     print("  --out <path>             Custom output directory")
     print()
-    print("OCR Options (video ocr):")
+    print("OCR Options (tools ocr):")
     print("  --lang <code>            Tesseract language code (e.g. eng, jpn, deu; default: eng)")
     print("  --separate               Write individual .txt file per image instead of single combined")
     print("  --out <dir>              Custom output directory")
@@ -470,6 +473,7 @@ def show_help():
     print()
 
 
+
 def run_cli_convert(args: list) -> int:
     """Execute media conversion command from CLI arguments."""
     from .converter import (
@@ -481,7 +485,7 @@ def run_cli_convert(args: list) -> int:
         convert_text_to_pdf,
         remux_or_transcode_video,
     )
-    from .utils import get_download_dir
+    from .utils import get_download_dir, get_tool_output_dir
 
     if not args:
         print("[-] Usage: video convert <input_file> --to <format> [options]")
@@ -539,7 +543,7 @@ def run_cli_convert(args: list) -> int:
         else:
             out_path = custom_out
     else:
-        out_path = input_file.parent / f"{input_file.stem}.{target_fmt}"
+        out_path = get_tool_output_dir("converter") / f"{input_file.stem}.{target_fmt}"
 
     print(f"\n[+] Input  : {input_file.name}")
     print(f"[+] Target : {target_fmt.upper()}")
@@ -576,10 +580,68 @@ def run_cli_convert(args: list) -> int:
         return 1
 
 
+def run_cli_combine(args: list) -> int:
+    """Execute video concatenation and merging from CLI arguments."""
+    from .converter import combine_videos
+
+    if not args or len(args) < 2:
+        print("[-] Usage: tools combine <video1> <video2> [...] [--out <output.mp4>] [--reencode]")
+        return 1
+
+    input_files = []
+    custom_out = None
+    reencode = False
+
+    idx = 0
+    while idx < len(args):
+        a = args[idx]
+        if a == "--out" and idx + 1 < len(args):
+            custom_out = Path(args[idx + 1])
+            idx += 1
+        elif a.startswith("--out="):
+            custom_out = Path(a.split("=", 1)[1])
+        elif a in ("--reencode", "--re-encode"):
+            reencode = True
+        elif not a.startswith("-"):
+            p = Path(a)
+            if not p.is_file():
+                print(f"[-] Video file not found: {a}")
+                return 1
+            input_files.append(p)
+        idx += 1
+
+    if len(input_files) < 2:
+        print("[-] Please specify at least 2 video files to combine.")
+        return 1
+
+    if not custom_out:
+        conv_dir = get_tool_output_dir("converter")
+        custom_out = conv_dir / f"combined_{input_files[0].stem}_{len(input_files)}clips.mp4"
+    elif custom_out.is_dir():
+        custom_out = custom_out / f"combined_{input_files[0].stem}_{len(input_files)}clips.mp4"
+
+    print(f"\n[+] Combining {len(input_files)} video clips...")
+    for i, f in enumerate(input_files, 1):
+        print(f"  {i}. {f.name}")
+    print(f"[+] Output: {custom_out}\n")
+
+    def _progress(pct: int, msg: str):
+        print(f"  [{pct:>3}%] {msg}")
+
+    try:
+        combine_videos(input_files, custom_out, reencode=reencode, progress_callback=_progress)
+        print(f"\n[✓] Successfully combined {len(input_files)} videos into: {custom_out}\n")
+        return 0
+    except Exception as e:
+        print(f"\n[-] Video combine failed: {e}\n")
+        return 1
+
+
 def run_cli_comic(args: list) -> int:
+
     """Execute comic/gallery scraper from CLI arguments."""
     from .comic_scraper import scrape_and_download_comic
-    from .utils import get_download_dir
+    from .utils import get_download_dir, get_tool_output_dir
 
     if not args:
         print("[-] Usage: video comic <url_or_html_file> [--pdf] [--cbz] [--cookies <cookies.txt>] [--out <dir>]")
@@ -620,7 +682,7 @@ def run_cli_comic(args: list) -> int:
     try:
         result_path = scrape_and_download_comic(
             source=source,
-            output_base_dir=custom_out,
+            output_base_dir=custom_out or get_tool_output_dir("comic"),
             auto_format=auto_format,
             cookie_file=cookie_file,
             respect_robots=respect_robots,
@@ -636,6 +698,7 @@ def run_cli_comic(args: list) -> int:
 def run_cli_ocr(args: list) -> int:
     """Execute OCR image-to-text extraction from CLI arguments."""
     from .ocr import run_ocr
+    from .utils import get_tool_output_dir
 
     if not args:
         print("[-] Usage: video ocr <image_or_folder> [--lang <code, default: eng>] [--separate] [--out <dir>]")
@@ -671,7 +734,7 @@ def run_cli_ocr(args: list) -> int:
     try:
         ok, out_path, preview = run_ocr(
             target=target,
-            output_dir=custom_out,
+            output_dir=custom_out or get_tool_output_dir("ocr"),
             lang=lang,
             combine_output=combine_output,
             progress_callback=_progress,
@@ -708,7 +771,7 @@ def run_cli_preview(args: list) -> int:
 def run_cli_pack(args: list) -> int:
     """Execute image folder packaging into PDF or CBZ from CLI arguments."""
     from .packager import images_to_pdf, images_to_cbz, batch_pack_folders
-    from .utils import get_download_dir
+    from .utils import get_download_dir, get_tool_output_dir
 
     if not args:
         print("[-] Usage: video pack <folder> --to <pdf|cbz> [--recurse] [--out <dir>]")
@@ -744,7 +807,7 @@ def run_cli_pack(args: list) -> int:
         print(f"  [{pct:>3}%] {msg}")
 
     try:
-        out_dir = custom_out or folder.parent
+        out_dir = custom_out or get_tool_output_dir("packager")
         out_dir.mkdir(parents=True, exist_ok=True)
 
         if recurse:
@@ -770,7 +833,7 @@ def run_cli_pack(args: list) -> int:
 
 
 def show_version():
-    print(f"Video Extractor v{get_version()}")
+    print(f"Tool-Kit CLI v{get_version()}")
 
 
 def show_history():
@@ -959,6 +1022,19 @@ def main():
         "convert"
     ):
         return run_cli_convert(args[1:])
+
+    # ========================================================
+    # COMBINE / MERGE VIDEOS
+    # ========================================================
+
+    if args[0] in (
+        "--combine",
+        "combine",
+        "--merge",
+        "merge",
+    ):
+        return run_cli_combine(args[1:])
+
 
     # ========================================================
     # COMIC / IMAGE GALLERY SCRAPER
@@ -1168,7 +1244,7 @@ def main():
 
     print()
     print("=" * 60)
-    print("                 VIDEO EXTRACTOR")
+    print("                 TOOL-KIT CLI")
     print("=" * 60)
     print()
 

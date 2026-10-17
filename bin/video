@@ -19,7 +19,9 @@ export SRC
 export PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}"
 
 PYTHON_BIN="python3"
-if ! command -v python3 >/dev/null 2>&1; then
+if command -v py >/dev/null 2>&1; then
+    PYTHON_BIN="py"
+elif ! command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="python"
 fi
 

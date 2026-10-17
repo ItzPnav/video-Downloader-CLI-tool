@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+# Resolve directory of this script, following symlinks
+PRG="$0"
+while [ -h "$PRG" ]; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`/"$link"
+    fi
+done
+BIN_DIR=`dirname "$PRG"`
+PROJECT=`cd "$BIN_DIR/.." && pwd`
+SRC="$PROJECT/src"
+
+export SRC
+export PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}"
+
+PYTHON_BIN="python3"
+if command -v py >/dev/null 2>&1; then
+    PYTHON_BIN="py"
+elif ! command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+fi
+
+exec "$PYTHON_BIN" "$SRC/main.py" "$@"

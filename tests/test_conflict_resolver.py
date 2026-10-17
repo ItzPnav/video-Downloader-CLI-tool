@@ -47,7 +47,7 @@ class TestConflictResolver(unittest.TestCase):
         self.assertEqual(generate_unique_path(target), target)
 
     def test_generate_unique_path_incrementing(self):
-        """When files exist, increment (1), (2), (3)..."""
+        """When files exist, increment (1), (2), (3)... without creating (1) (1)."""
         file0 = self.base_dir / "my_video.mp4"
         file0.write_bytes(b"content 0")
 
@@ -58,9 +58,20 @@ class TestConflictResolver(unittest.TestCase):
         # Create my_video (1).mp4
         res1.write_bytes(b"content 1")
 
-        # Second collision -> my_video (2).mp4
+        # Second collision from base -> my_video (2).mp4
         res2 = generate_unique_path(file0)
         self.assertEqual(res2.name, "my_video (2).mp4")
+
+        # Collision where target itself is already my_video (1).mp4 -> should return my_video (2).mp4
+        res2_direct = generate_unique_path(res1)
+        self.assertEqual(res2_direct.name, "my_video (2).mp4")
+
+        # Create my_video (2).mp4
+        res2.write_bytes(b"content 2")
+
+        # Collision from my_video (1).mp4 when (2) exists -> my_video (3).mp4
+        res3 = generate_unique_path(res1)
+        self.assertEqual(res3.name, "my_video (3).mp4")
 
     def test_probe_file_info(self):
         """Test reading local file stat information."""
@@ -114,6 +125,28 @@ class TestConflictResolver(unittest.TestCase):
         p_skip = resolve_file_conflict(existing, cand, conflict_policy="skip")
         self.assertIsNone(p_skip)
 
+    @patch("video_downloader.utils.load_config")
+    def test_resolve_file_conflict_from_config(self, mock_load_config):
+        """Test persistent config conflict_policy when no CLI override is specified."""
+        existing = self.base_dir / "conf_test.mp4"
+        existing.write_bytes(b"content")
+        cand = Candidate(url="https://example.com/v.mp4", source="static", score=90)
+
+        # Config policy: replace
+        mock_load_config.return_value = {"conflict_policy": "replace"}
+        p = resolve_file_conflict(existing, cand)
+        self.assertEqual(p, existing)
+
+        # Config policy: skip
+        mock_load_config.return_value = {"conflict_policy": "skip"}
+        p = resolve_file_conflict(existing, cand)
+        self.assertIsNone(p)
+
+        # Config policy: keep_both
+        mock_load_config.return_value = {"conflict_policy": "keep_both"}
+        p = resolve_file_conflict(existing, cand)
+        self.assertEqual(p.name, "conf_test (1).mp4")
+
     def test_resolve_file_conflict_non_interactive_fallback(self):
         """In non-interactive environments, default to safe keep_both."""
         existing = self.base_dir / "clip.mp4"
@@ -125,8 +158,9 @@ class TestConflictResolver(unittest.TestCase):
             resolved = resolve_file_conflict(existing, cand)
             self.assertEqual(resolved.name, "clip (1).mp4")
 
-    @patch("subprocess.run")
-    def test_downloader_with_skip_policy(self, mock_subproc):
+    @patch("video_downloader.downloader.ensure_environment")
+    @patch("subprocess.Popen")
+    def test_downloader_with_skip_policy(self, mock_subproc, mock_env):
         """Verify downloader returns None and does not execute ffmpeg when skipped."""
         existing = self.base_dir / "movie.mp4"
         existing.write_bytes(b"old movie")
@@ -139,11 +173,18 @@ class TestConflictResolver(unittest.TestCase):
             # ffmpeg should not have been called
             mock_subproc.assert_not_called()
 
-    @patch("subprocess.run")
-    def test_downloader_with_keep_both_policy(self, mock_subproc):
+    @patch("video_downloader.downloader.ensure_environment")
+    @patch("subprocess.Popen")
+    def test_downloader_with_keep_both_policy(self, mock_subproc, mock_env):
         """Verify downloader saves to incremented filename when keep_both is set."""
         existing = self.base_dir / "movie.mp4"
         existing.write_bytes(b"old movie")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stderr = []
+        mock_proc.wait.return_value = 0
+        mock_subproc.return_value = mock_proc
 
         cand = Candidate(url="https://example.com/stream.m3u8", source="static", score=90, metadata={"title": "movie"})
 
@@ -152,6 +193,7 @@ class TestConflictResolver(unittest.TestCase):
             self.assertIsNotNone(res)
             self.assertTrue(res.endswith("movie (1).mp4"))
             mock_subproc.assert_called_once()
+
 
 
 if __name__ == "__main__":
