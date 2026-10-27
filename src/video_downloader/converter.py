@@ -199,6 +199,62 @@ def convert_video_to_gif(
     return output_path
 
 
+def batch_convert_videos_to_gif(
+    folder_path: str | Path,
+    output_dir: str | Path,
+    fps: int = 30,
+    height: int = 504,
+    colors: int = 256,
+    max_duration: float = 60.0,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> list[Path]:
+    """
+    Batch convert all video files in a directory to high-quality animated GIFs.
+    Returns a list of created GIF file paths.
+    """
+    folder = Path(folder_path).resolve()
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Directory not found: {folder}")
+
+    out_dir = Path(output_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    videos = sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+    )
+    if not videos:
+        return []
+
+    created: list[Path] = []
+    total = len(videos)
+
+    for idx, video_file in enumerate(videos, 1):
+        out_gif = out_dir / f"{video_file.stem}.gif"
+
+        def _item_progress(pct: int, msg: str, _idx=idx, _name=video_file.name):
+            if progress_callback:
+                overall = int(((_idx - 1) + (pct / 100.0)) / total * 100)
+                progress_callback(overall, f"[{_idx}/{total}] {_name}: {msg}")
+
+        res = convert_video_to_gif(
+            input_path=video_file,
+            output_path=out_gif,
+            fps=fps,
+            height=height,
+            colors=colors,
+            max_duration=max_duration,
+            progress_callback=_item_progress,
+        )
+        created.append(res)
+
+    if progress_callback:
+        progress_callback(100, f"Converted {len(created)}/{total} video(s) to GIF")
+
+    return created
+
+
+
 def convert_video_to_audio(
     input_path: str | Path,
     output_path: str | Path,
@@ -311,6 +367,53 @@ def convert_gif_to_mp4(
         progress_callback(100, f"Saved: {output_path.name}")
 
     return output_path
+
+
+def batch_convert_gifs_to_mp4(
+    folder_path: str | Path,
+    output_dir: str | Path,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> list[Path]:
+    """
+    Batch convert all animated GIF files in a directory to web-compatible H.264 MP4 videos.
+    Returns a list of created MP4 file paths.
+    """
+    folder = Path(folder_path).resolve()
+    if not folder.is_dir():
+        raise NotADirectoryError(f"Directory not found: {folder}")
+
+    out_dir = Path(output_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    gifs = sorted(
+        p for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() == ".gif"
+    )
+    if not gifs:
+        return []
+
+    created: list[Path] = []
+    total = len(gifs)
+
+    for idx, gif_file in enumerate(gifs, 1):
+        out_mp4 = out_dir / f"{gif_file.stem}.mp4"
+
+        def _item_progress(pct: int, msg: str, _idx=idx, _name=gif_file.name):
+            if progress_callback:
+                overall = int(((_idx - 1) + (pct / 100.0)) / total * 100)
+                progress_callback(overall, f"[{_idx}/{total}] {_name}: {msg}")
+
+        res = convert_gif_to_mp4(
+            input_path=gif_file,
+            output_path=out_mp4,
+            progress_callback=_item_progress,
+        )
+        created.append(res)
+
+    if progress_callback:
+        progress_callback(100, f"Converted {len(created)}/{total} GIF(s) to MP4")
+
+    return created
 
 
 def convert_image(

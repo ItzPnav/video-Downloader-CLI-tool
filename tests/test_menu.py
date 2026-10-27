@@ -244,6 +244,64 @@ class TestToolDirectories(unittest.TestCase):
             # All 5 paths must be completely distinct
             self.assertEqual(len(set(result.values())), 5)
 
+    def test_prompt_single_or_folder_mode_and_batch_converters(self):
+        """Verify Single File vs Batch Folder menu selection and batch conversion helpers."""
+        from video_downloader.menu import prompt_single_or_folder_mode
+        from video_downloader.converter import batch_convert_gifs_to_mp4, batch_convert_videos_to_gif
+
+        # 1. Choosing '1' selects 'file'
+        with patch("video_downloader.menu.read_key", side_effect=["1"]), \
+             patch("video_downloader.menu.clear_screen"):
+            mode = prompt_single_or_folder_mode(
+                "ANIMATED GIF -> MP4", "Single GIF File", "Desc 1", "Folder of GIFs", "Desc 2"
+            )
+            self.assertEqual(mode, "file")
+
+        # 2. Choosing '2' selects 'folder'
+        with patch("video_downloader.menu.read_key", side_effect=["2"]), \
+             patch("video_downloader.menu.clear_screen"):
+            mode = prompt_single_or_folder_mode(
+                "VIDEO -> ANIMATED GIF", "Single Video File", "Desc 1", "Folder of Videos", "Desc 2"
+            )
+            self.assertEqual(mode, "folder")
+
+        # 3. Choosing '0' cancels (None)
+        with patch("video_downloader.menu.read_key", side_effect=["0"]), \
+             patch("video_downloader.menu.clear_screen"):
+            mode = prompt_single_or_folder_mode(
+                "VIDEO -> ANIMATED GIF", "Single Video File", "Desc 1", "Folder of Videos", "Desc 2"
+            )
+            self.assertIsNone(mode)
+
+        # 4. Batch GIF -> MP4 conversion over a folder
+        gif_dir = self.base_dir / "gifs"
+        gif_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = self.base_dir / "mp4_out"
+        (gif_dir / "anim1.gif").write_bytes(b"GIF89a")
+        (gif_dir / "anim2.gif").write_bytes(b"GIF89a")
+        (gif_dir / "ignore.txt").write_text("not a gif")
+
+        with patch("video_downloader.converter.convert_gif_to_mp4") as mock_gif2mp4:
+            mock_gif2mp4.side_effect = lambda input_path, output_path, **kw: output_path
+            res = batch_convert_gifs_to_mp4(gif_dir, out_dir)
+            self.assertEqual(len(res), 2)
+            self.assertEqual(mock_gif2mp4.call_count, 2)
+            self.assertEqual([p.name for p in res], ["anim1.mp4", "anim2.mp4"])
+
+        # 5. Batch Video -> GIF conversion over a folder
+        vid_dir = self.base_dir / "vids"
+        vid_dir.mkdir(parents=True, exist_ok=True)
+        gif_out_dir = self.base_dir / "gif_out"
+        (vid_dir / "clip1.mp4").write_bytes(b"mp4")
+        (vid_dir / "clip2.mkv").write_bytes(b"mkv")
+
+        with patch("video_downloader.converter.convert_video_to_gif") as mock_vid2gif:
+            mock_vid2gif.side_effect = lambda input_path, output_path, **kw: output_path
+            res_gifs = batch_convert_videos_to_gif(vid_dir, gif_out_dir, fps=24, height=480, colors=128)
+            self.assertEqual(len(res_gifs), 2)
+            self.assertEqual(mock_vid2gif.call_count, 2)
+            self.assertEqual([p.name for p in res_gifs], ["clip1.gif", "clip2.gif"])
+
 
 if __name__ == "__main__":
     unittest.main()

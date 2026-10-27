@@ -328,6 +328,8 @@ def browse_interactive_path(
     while True:
         try:
             entries = []
+            if mode == "folder":
+                entries.append((f"[Select This Folder: {current_dir.name or str(current_dir)}]", current_dir, "SELECT_CURRENT"))
             # Option to go up
             if current_dir.parent != current_dir:
                 entries.append(("..", current_dir.parent, True))
@@ -378,10 +380,16 @@ def browse_interactive_path(
 
             for idx in range(start_idx, end_idx):
                 name, path_obj, is_dir = entries[idx]
-                if is_dir:
+                if is_dir == "SELECT_CURRENT":
+                    icon = f"{FG_GREEN}✅{RESET}"
+                    label = name if len(name) <= 36 else name[:33] + "...]"
+                    info_str = f"{FG_GREEN}[ENTER / SPACE]{RESET}"
+                elif is_dir:
                     icon = f"{FG_YELLOW}📁{RESET}"
                     label = f"{BOLD}{name}/{RESET}"
                     info_str = f"{DIM}[DIR]{RESET}"
+                    if len(name) > 36:
+                        label = name[:33] + "..."
                 else:
                     icon = f"{FG_CYAN}📄{RESET}"
                     label = f"{name}"
@@ -390,9 +398,8 @@ def browse_interactive_path(
                         info_str = f"{DIM}[{sz_mb:.1f} MB]{RESET}"
                     except Exception:
                         info_str = ""
-
-                if len(name) > 36:
-                    label = name[:33] + "..."
+                    if len(name) > 36:
+                        label = name[:33] + "..."
 
                 if idx == cursor_idx:
                     prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
@@ -408,7 +415,7 @@ def browse_interactive_path(
 
         print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
         if mode == "folder":
-            print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Open  {DIM}•{RESET} {FG_YELLOW}[Space]{RESET} Select Current Folder  {DIM}•{RESET} {FG_BLUE}[p]{RESET} Type Path  {DIM}•{RESET} {FG_RED}[Esc]{RESET} Cancel")
+            print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select/Open  {DIM}•{RESET} {FG_YELLOW}[Space]{RESET} Select Current Folder  {DIM}•{RESET} {FG_BLUE}[p]{RESET} Type Path  {DIM}•{RESET} {FG_RED}[Esc]{RESET} Cancel")
         else:
             print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select/Open  {DIM}•{RESET} {FG_BLUE}[p]{RESET} Type Path  {DIM}•{RESET} {FG_RED}[Esc]{RESET} Cancel")
 
@@ -425,12 +432,16 @@ def browse_interactive_path(
             if not entries:
                 continue
             name, path_obj, is_dir = entries[cursor_idx]
-            if is_dir:
+            if is_dir == "SELECT_CURRENT":
+                return current_dir
+            elif is_dir:
                 current_dir = path_obj.resolve()
                 cursor_idx = 0
             else:
                 if mode in ("file", "any"):
                     return path_obj
+                elif mode == "folder":
+                    return current_dir
         elif key in ("p", "P", "/"):
             clear_screen()
             show_cursor()
@@ -1056,13 +1067,74 @@ def action_other_tools(config: dict):
             break
 
 
+def prompt_single_or_folder_mode(
+    header_title: str,
+    single_title: str,
+    single_desc: str,
+    folder_title: str,
+    folder_desc: str,
+) -> str | None:
+    """
+    Prompt user with an arrow-key & number-key submenu to choose between
+    converting a single file ('file') or an entire folder ('folder').
+    Returns 'file', 'folder', or None if cancelled.
+    """
+    options = [
+        ("📄", single_title, single_desc),
+        ("📂", folder_title, folder_desc),
+        ("←", "Back to Media Converter", "Cancel and return to converter menu"),
+    ]
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}{header_title:<36}{RESET}  {DIM}Single or Batch Mode{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f" {DIM}Choose whether to convert a single file or an entire folder:{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon} {title:<30}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon} {title:<30}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-2, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 2):
+            return None
+
+        if key == "ENTER":
+            if selected_idx == 0:
+                return "file"
+            elif selected_idx == 1:
+                return "folder"
+
+
 def action_convert(config: dict):
     """Sub-Action: Interactive Media Converter."""
     from .converter import (
         convert_video_to_gif,
+        batch_convert_videos_to_gif,
         convert_video_to_audio,
         convert_audio_to_audio,
         convert_gif_to_mp4,
+        batch_convert_gifs_to_mp4,
         convert_image,
         convert_text_to_pdf,
         remux_or_transcode_video,
@@ -1077,11 +1149,11 @@ def action_convert(config: dict):
         c_disp = "..." + c_dir[-33:] if len(c_dir) > 36 else c_dir
 
         conv_options = [
-            ("Video → Animated GIF (High Quality 2-Pass)", "Create smooth GIF with palette optimization"),
+            ("Video → Animated GIF (High Quality 2-Pass)", "Single video or batch folder to smooth GIF"),
             ("Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
             ("Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
             ("Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
-            ("Animated GIF → MP4 Video", "Convert GIF animation into lightweight MP4"),
+            ("Animated GIF → MP4 Video", "Single GIF or batch folder into lightweight MP4"),
             ("Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
             ("Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
             ("Combine / Merge Video Clips", "Concatenate multiple video files in sequence"),
@@ -1128,17 +1200,211 @@ def action_convert(config: dict):
 
         if key == "ENTER" and selected_idx < 7:
             choice_num = selected_idx
+            out_dir = get_tool_output_dir("converter", cfg)
 
-            # Filter allowed extensions based on operation
+            def _progress(pct: int, msg: str):
+                bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+                sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg:<42}")
+                sys.stdout.flush()
+
+            # Special Single File vs Batch Folder workflow for [1] Video -> GIF and [5] GIF -> MP4
+            if choice_num == 0:  # [1] Video -> Animated GIF (High Quality 2-Pass)
+                target_mode = prompt_single_or_folder_mode(
+                    header_title="🎞  VIDEO → ANIMATED GIF",
+                    single_title="Single Video File",
+                    single_desc="Pick a single video file to convert to GIF",
+                    folder_title="Folder of Videos (Batch)",
+                    folder_desc="Convert all video files in a folder to GIFs",
+                )
+                if not target_mode:
+                    continue
+
+                if target_mode == "file":
+                    input_path = browse_interactive_path(
+                        mode="file",
+                        title="Pick Video File for GIF",
+                        allowed_exts=VIDEO_EXTENSIONS,
+                    )
+                    if not input_path or not input_path.is_file():
+                        continue
+
+                    clear_screen()
+                    show_cursor()
+                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+                    print(f"{DIM}Selected Video:{RESET} {FG_GREEN}{input_path}{RESET}\n")
+
+                    try:
+                        print(f"{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
+                        fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
+                        res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
+                        qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
+
+                        fps = int(fps_in) if fps_in.isdigit() else 30
+                        height = int(res_in) if res_in.isdigit() else 504
+                        colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
+
+                        out_gif = out_dir / f"{input_path.stem}.gif"
+                        print(f"\n[+] Converting to GIF: {out_gif.name}...")
+                        convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
+                        print(f"\n\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
+                    except Exception as e:
+                        print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+
+                    pause_prompt()
+                    hide_cursor()
+                    continue
+
+                else:  # target_mode == "folder"
+                    folder_path = browse_interactive_path(
+                        mode="folder",
+                        title="Pick Folder with Videos for GIF",
+                        allowed_exts=VIDEO_EXTENSIONS,
+                    )
+                    if not folder_path or not folder_path.is_dir():
+                        continue
+
+                    videos = sorted(
+                        p for p in folder_path.iterdir()
+                        if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+                    )
+                    clear_screen()
+                    show_cursor()
+                    print(f"\n{BOLD}{FG_CYAN}=== Batch Video → Animated GIF ==={RESET}")
+                    print(f"{DIM}Selected Folder:{RESET} {FG_YELLOW}{folder_path}{RESET}\n")
+
+                    if not videos:
+                        print(f"{FG_YELLOW}[!] No video files found in: {folder_path}{RESET}")
+                        pause_prompt()
+                        hide_cursor()
+                        continue
+
+                    print(f"[+] Found {BOLD}{len(videos)}{RESET} video file(s) in folder:")
+                    for i, v in enumerate(videos[:10], 1):
+                        print(f"    {i:>2}. {v.name}")
+                    if len(videos) > 10:
+                        print(f"    ... and {len(videos) - 10} more")
+                    print()
+
+                    try:
+                        print(f"{BOLD}GIF Settings for All {len(videos)} Videos (Press Enter for defaults):{RESET}")
+                        fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
+                        res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
+                        qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
+
+                        fps = int(fps_in) if fps_in.isdigit() else 30
+                        height = int(res_in) if res_in.isdigit() else 504
+                        colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
+
+                        print(f"\n[+] Batch converting {len(videos)} video(s) to GIF...")
+                        created = batch_convert_videos_to_gif(
+                            folder_path=folder_path,
+                            output_dir=out_dir,
+                            fps=fps,
+                            height=height,
+                            colors=colors,
+                            progress_callback=_progress,
+                        )
+                        print(f"\n\n{FG_GREEN}[✓] Batch complete! Converted {len(created)} video(s) to GIF in:{RESET}")
+                        print(f"    {out_dir}")
+                    except Exception as e:
+                        print(f"\n\n{FG_RED}[-] Batch conversion failed: {e}{RESET}")
+
+                    pause_prompt()
+                    hide_cursor()
+                    continue
+
+            elif choice_num == 4:  # [5] Animated GIF -> MP4 Video
+                target_mode = prompt_single_or_folder_mode(
+                    header_title="🎬  ANIMATED GIF → MP4 VIDEO",
+                    single_title="Single GIF File",
+                    single_desc="Pick a single .gif file to convert to MP4",
+                    folder_title="Folder of GIFs (Batch)",
+                    folder_desc="Convert all .gif files in a folder to MP4",
+                )
+                if not target_mode:
+                    continue
+
+                if target_mode == "file":
+                    input_path = browse_interactive_path(
+                        mode="file",
+                        title="Pick GIF File for MP4",
+                        allowed_exts={".gif"},
+                    )
+                    if not input_path or not input_path.is_file():
+                        continue
+
+                    clear_screen()
+                    show_cursor()
+                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+                    print(f"{DIM}Selected GIF:{RESET} {FG_GREEN}{input_path}{RESET}\n")
+
+                    try:
+                        out_mp4 = out_dir / f"{input_path.stem}.mp4"
+                        print(f"[+] Converting GIF to MP4: {out_mp4.name}...")
+                        convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
+                        print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
+                    except Exception as e:
+                        print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+
+                    pause_prompt()
+                    hide_cursor()
+                    continue
+
+                else:  # target_mode == "folder"
+                    folder_path = browse_interactive_path(
+                        mode="folder",
+                        title="Pick Folder with GIFs for MP4",
+                        allowed_exts={".gif"},
+                    )
+                    if not folder_path or not folder_path.is_dir():
+                        continue
+
+                    gifs = sorted(
+                        p for p in folder_path.iterdir()
+                        if p.is_file() and p.suffix.lower() == ".gif"
+                    )
+                    clear_screen()
+                    show_cursor()
+                    print(f"\n{BOLD}{FG_CYAN}=== Batch Animated GIF → MP4 Video ==={RESET}")
+                    print(f"{DIM}Selected Folder:{RESET} {FG_YELLOW}{folder_path}{RESET}\n")
+
+                    if not gifs:
+                        print(f"{FG_YELLOW}[!] No .gif files found in: {folder_path}{RESET}")
+                        pause_prompt()
+                        hide_cursor()
+                        continue
+
+                    print(f"[+] Found {BOLD}{len(gifs)}{RESET} GIF file(s) in folder:")
+                    for i, g in enumerate(gifs[:10], 1):
+                        print(f"    {i:>2}. {g.name}")
+                    if len(gifs) > 10:
+                        print(f"    ... and {len(gifs) - 10} more")
+                    print()
+
+                    try:
+                        print(f"[+] Batch converting {len(gifs)} GIF(s) to MP4...")
+                        created = batch_convert_gifs_to_mp4(
+                            folder_path=folder_path,
+                            output_dir=out_dir,
+                            progress_callback=_progress,
+                        )
+                        print(f"\n\n{FG_GREEN}[✓] Batch complete! Converted {len(created)} GIF(s) to MP4 in:{RESET}")
+                        print(f"    {out_dir}")
+                    except Exception as e:
+                        print(f"\n\n{FG_RED}[-] Batch conversion failed: {e}{RESET}")
+
+                    pause_prompt()
+                    hide_cursor()
+                    continue
+
+            # Filter allowed extensions based on remaining single-file operations
             ext_filter = None
-            if choice_num in (0, 1, 6):
+            if choice_num in (1, 6):
                 ext_filter = VIDEO_EXTENSIONS
             elif choice_num == 2:
                 ext_filter = AUDIO_EXTENSIONS
             elif choice_num == 3:
                 ext_filter = DOCUMENT_EXTENSIONS
-            elif choice_num == 4:
-                ext_filter = {".gif"}
             elif choice_num == 5:
                 ext_filter = IMAGE_EXTENSIONS
 
@@ -1156,30 +1422,8 @@ def action_convert(config: dict):
             print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
             print(f"{DIM}Selected Input:{RESET} {FG_GREEN}{input_path}{RESET}\n")
 
-            out_dir = get_tool_output_dir("converter", cfg)
-
-            def _progress(pct: int, msg: str):
-                bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-                sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
-                sys.stdout.flush()
-
             try:
-                if choice_num == 0:  # Video -> GIF
-                    print(f"{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
-                    fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
-                    res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
-                    qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
-
-                    fps = int(fps_in) if fps_in.isdigit() else 30
-                    height = int(res_in) if res_in.isdigit() else 504
-                    colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
-
-                    out_gif = out_dir / f"{input_path.stem}.gif"
-                    print(f"\n[+] Converting to GIF: {out_gif.name}...")
-                    convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
-
-                elif choice_num == 1:  # Video -> MP3
+                if choice_num == 1:  # Video -> MP3
                     out_mp3 = out_dir / f"{input_path.stem}.mp3"
                     print(f"\n[+] Extracting MP3 audio...")
                     convert_video_to_audio(input_path, out_mp3, audio_format="mp3", bitrate="320k", progress_callback=_progress)
@@ -1197,12 +1441,6 @@ def action_convert(config: dict):
                     print(f"\n[+] Rendering Text Document to PDF...")
                     convert_text_to_pdf(input_path, out_pdf, progress_callback=_progress)
                     print(f"\n\n{FG_GREEN}[✓] Saved: {out_pdf}{RESET}")
-
-                elif choice_num == 4:  # GIF -> MP4
-                    out_mp4 = out_dir / f"{input_path.stem}.mp4"
-                    print(f"\n[+] Converting GIF to MP4...")
-                    convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
 
                 elif choice_num == 5:  # Image Format
                     fmt = input("  Target format (png/jpg/webp/bmp/tiff, default png): ").strip().lower() or "png"
