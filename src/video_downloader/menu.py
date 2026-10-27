@@ -4,6 +4,7 @@ Provides arrow-key driven workflows, clean ANSI interface, interactive disk brow
 """
 
 import os
+import re
 import sys
 import shutil
 import time
@@ -906,6 +907,7 @@ def action_file_conflict_settings(config: dict):
 def action_video_tools(config: dict):
     """Sub-Action: Video Suite (Download, Play, Combine, Set Directory, Conflict Policy, Clean)."""
     selected_idx = 0
+    status_banner: str | None = None
     hide_cursor()
 
     while True:
@@ -938,7 +940,11 @@ def action_video_tools(config: dict):
         clear_screen()
         print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
         print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🎬  VIDEO TOOLS & UTILITIES{RESET}       {DIM}Download, combine, play & clean{RESET}  {BOLD}{FG_CYAN}│{RESET}")
-        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}")
+        if status_banner:
+            print(f"\n  {status_banner}\n")
+        else:
+            print()
 
         for idx, (icon, title, desc) in enumerate(options):
             num = idx + 1 if idx < len(options) - 1 else 0
@@ -960,6 +966,7 @@ def action_video_tools(config: dict):
         elif key == "DOWN":
             selected_idx = (selected_idx + 1) % len(options)
         elif key in ("1", "2", "3", "4", "5", "6"):
+            status_banner = None
             num = int(key) - 1
             selected_idx = num
             if num == 0:
@@ -967,7 +974,14 @@ def action_video_tools(config: dict):
             elif num == 1:
                 action_open(cfg)
             elif num == 2:
-                action_combine_videos(cfg)
+                try:
+                    res = action_combine_videos(cfg)
+                    if res:
+                        m = re.search(r"_(\d+)clips(?:_\d+)?(?:\.[^.]+)?$", res.name)
+                        count_str = f"{m.group(1)} " if m else ""
+                        status_banner = f"{FG_GREEN}[✓] Combined {count_str}videos into: {res.name}{RESET}"
+                except Exception as err:
+                    status_banner = f"{FG_RED}[-] Video combine failed: {err}{RESET}"
             elif num == 3:
                 action_change_tool_directory(cfg, "video", "Video Downloads")
             elif num == 4:
@@ -977,12 +991,20 @@ def action_video_tools(config: dict):
         elif key == "0" or (key == "ENTER" and selected_idx == 6):
             break
         elif key == "ENTER":
+            status_banner = None
             if selected_idx == 0:
                 action_download(cfg)
             elif selected_idx == 1:
                 action_open(cfg)
             elif selected_idx == 2:
-                action_combine_videos(cfg)
+                try:
+                    res = action_combine_videos(cfg)
+                    if res:
+                        m = re.search(r"_(\d+)clips(?:_\d+)?(?:\.[^.]+)?$", res.name)
+                        count_str = f"{m.group(1)} " if m else ""
+                        status_banner = f"{FG_GREEN}[✓] Combined {count_str}videos into: {res.name}{RESET}"
+                except Exception as err:
+                    status_banner = f"{FG_RED}[-] Video combine failed: {err}{RESET}"
             elif selected_idx == 3:
                 action_change_tool_directory(cfg, "video", "Video Downloads")
             elif selected_idx == 4:
@@ -1141,6 +1163,7 @@ def action_convert(config: dict):
     )
 
     selected_idx = 0
+    status_banner: str | None = None
     hide_cursor()
 
     while True:
@@ -1149,33 +1172,37 @@ def action_convert(config: dict):
         c_disp = "..." + c_dir[-33:] if len(c_dir) > 36 else c_dir
 
         conv_options = [
-            ("Video → Animated GIF (High Quality 2-Pass)", "Single video or batch folder to smooth GIF"),
-            ("Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
-            ("Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
-            ("Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
-            ("Animated GIF → MP4 Video", "Single GIF or batch folder into lightweight MP4"),
-            ("Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
-            ("Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
-            ("Combine / Merge Video Clips", "Concatenate multiple video files in sequence"),
-            ("📁 Change Converter Directory", f"Current: {c_disp}"),
-            ("← Back to Other Tools", "Return to utilities menu"),
+            ("🎞", "Video → Animated GIF (High Quality 2-Pass)", "Single video or batch folder to smooth GIF"),
+            ("🎵", "Video → MP3 Audio (320 kbps)", "Extract high-bitrate MP3 soundtrack"),
+            ("🔊", "Audio ↔ Audio Transcoder (WAV/FLAC/AAC/OGG)", "Convert audio formats with FFmpeg"),
+            ("📄", "Text Document → PDF (.txt / .md / .csv)", "Render text files into formatted PDF"),
+            ("🎬", "Animated GIF → MP4 Video", "Single GIF or batch folder into lightweight MP4"),
+            ("🖼", "Image Format Converter (PNG / JPG / WEBP)", "Convert single image or batch"),
+            ("🔄", "Video Remux / Transcode (Container Switch)", "Fast copy or re-encode video container"),
+            ("🔀", "Combine / Merge Video Clips", "Concatenate multiple video files in sequence"),
+            ("📁", "Change Converter Directory", f"Current: {c_disp}"),
+            ("←", "Back to Other Tools", "Return to utilities menu"),
         ]
 
         clear_screen()
         print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
         print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🔄  MEDIA CONVERTER{RESET}        {DIM}FFmpeg & Pillow zero-bloat engine{RESET}  {BOLD}{FG_CYAN}│{RESET}")
-        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}")
+        if status_banner:
+            print(f"\n  {status_banner}\n")
+        else:
+            print()
 
-        for idx, (label, desc) in enumerate(conv_options):
+        for idx, (icon, label, desc) in enumerate(conv_options):
             num = idx + 1 if idx < len(conv_options) - 1 else 0
             if idx == selected_idx:
                 prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
                 num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num:>2} {RESET}"
-                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon}  {label:<46}{RESET} {DIM}— {desc}{RESET}")
             else:
                 prefix = "   "
                 num_badge = f"{DIM}[{num:>2}]{RESET}"
-                print(f"{prefix} {num_badge} {FG_WHITE}{label:<46}{RESET} {DIM}— {desc}{RESET}")
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon}  {label:<46}{RESET} {DIM}— {desc}{RESET}")
 
         print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
         print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-9, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
@@ -1188,17 +1215,27 @@ def action_convert(config: dict):
         elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9"):
             selected_idx = int(key) - 1
             key = "ENTER"
-        elif key == "0" or (key == "ENTER" and selected_idx == 9):
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 9):
             break
 
-        if key == "ENTER" and selected_idx == 7:  # Combine
-            action_combine_videos(cfg)
+        if key == "ENTER" and selected_idx == 7:  # Combine / Merge Video Clips
+            status_banner = None
+            try:
+                res = action_combine_videos(cfg)
+                if res:
+                    m = re.search(r"_(\d+)clips(?:_\d+)?(?:\.[^.]+)?$", res.name)
+                    count_str = f"{m.group(1)} " if m else ""
+                    status_banner = f"{FG_GREEN}[✓] Combined {count_str}videos into: {res.name}{RESET}"
+            except Exception as err:
+                status_banner = f"{FG_RED}[-] Video combine failed: {err}{RESET}"
             continue
         elif key == "ENTER" and selected_idx == 8:  # Change directory
+            status_banner = None
             action_change_tool_directory(cfg, "converter", "Media Converter")
             continue
 
         if key == "ENTER" and selected_idx < 7:
+            status_banner = None
             choice_num = selected_idx
             out_dir = get_tool_output_dir("converter", cfg)
 
@@ -1230,27 +1267,20 @@ def action_convert(config: dict):
 
                     clear_screen()
                     show_cursor()
-                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]}  {conv_options[choice_num][1]} ==={RESET}")
                     print(f"{DIM}Selected Video:{RESET} {FG_GREEN}{input_path}{RESET}\n")
 
                     try:
-                        print(f"{BOLD}GIF Settings (Press Enter for defaults):{RESET}")
-                        fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
-                        res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
-                        qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
-
-                        fps = int(fps_in) if fps_in.isdigit() else 30
-                        height = int(res_in) if res_in.isdigit() else 504
-                        colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
-
+                        fps = 30
+                        height = 504
+                        colors = 256
                         out_gif = out_dir / f"{input_path.stem}.gif"
-                        print(f"\n[+] Converting to GIF: {out_gif.name}...")
+                        print(f"[+] Converting to GIF (30 FPS, 504p, 256 colors): {out_gif.name}...")
                         convert_video_to_gif(input_path, out_gif, fps=fps, height=height, colors=colors, progress_callback=_progress)
-                        print(f"\n\n{FG_GREEN}[✓] Saved: {out_gif}{RESET}")
+                        status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_gif.name}{RESET}"
                     except Exception as e:
-                        print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+                        status_banner = f"{FG_RED}[-] Conversion failed: {e}{RESET}"
 
-                    pause_prompt()
                     hide_cursor()
                     continue
 
@@ -1273,8 +1303,7 @@ def action_convert(config: dict):
                     print(f"{DIM}Selected Folder:{RESET} {FG_YELLOW}{folder_path}{RESET}\n")
 
                     if not videos:
-                        print(f"{FG_YELLOW}[!] No video files found in: {folder_path}{RESET}")
-                        pause_prompt()
+                        status_banner = f"{FG_YELLOW}[!] No video files found in: {folder_path.name}{RESET}"
                         hide_cursor()
                         continue
 
@@ -1286,16 +1315,10 @@ def action_convert(config: dict):
                     print()
 
                     try:
-                        print(f"{BOLD}GIF Settings for All {len(videos)} Videos (Press Enter for defaults):{RESET}")
-                        fps_in = input("  FPS [default 30, max 60]: ").strip() or "30"
-                        res_in = input("  Height resolution [504p / 480p / 360p, default 504]: ").strip().replace("p", "") or "504"
-                        qual_in = input("  Color quality [high/med/low, default high]: ").strip().lower() or "high"
-
-                        fps = int(fps_in) if fps_in.isdigit() else 30
-                        height = int(res_in) if res_in.isdigit() else 504
-                        colors = 256 if "high" in qual_in else (128 if "med" in qual_in else 64)
-
-                        print(f"\n[+] Batch converting {len(videos)} video(s) to GIF...")
+                        fps = 30
+                        height = 504
+                        colors = 256
+                        print(f"[+] Batch converting {len(videos)} video(s) to GIF (30 FPS, 504p, 256 colors)...")
                         created = batch_convert_videos_to_gif(
                             folder_path=folder_path,
                             output_dir=out_dir,
@@ -1304,12 +1327,10 @@ def action_convert(config: dict):
                             colors=colors,
                             progress_callback=_progress,
                         )
-                        print(f"\n\n{FG_GREEN}[✓] Batch complete! Converted {len(created)} video(s) to GIF in:{RESET}")
-                        print(f"    {out_dir}")
+                        status_banner = f"{FG_GREEN}[✓] Converted / Saved: {len(created)} GIF(s) in {out_dir.name}{RESET}"
                     except Exception as e:
-                        print(f"\n\n{FG_RED}[-] Batch conversion failed: {e}{RESET}")
+                        status_banner = f"{FG_RED}[-] Batch conversion failed: {e}{RESET}"
 
-                    pause_prompt()
                     hide_cursor()
                     continue
 
@@ -1335,18 +1356,17 @@ def action_convert(config: dict):
 
                     clear_screen()
                     show_cursor()
-                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+                    print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]}  {conv_options[choice_num][1]} ==={RESET}")
                     print(f"{DIM}Selected GIF:{RESET} {FG_GREEN}{input_path}{RESET}\n")
 
                     try:
                         out_mp4 = out_dir / f"{input_path.stem}.mp4"
                         print(f"[+] Converting GIF to MP4: {out_mp4.name}...")
                         convert_gif_to_mp4(input_path, out_mp4, progress_callback=_progress)
-                        print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp4}{RESET}")
+                        status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_mp4.name}{RESET}"
                     except Exception as e:
-                        print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+                        status_banner = f"{FG_RED}[-] Conversion failed: {e}{RESET}"
 
-                    pause_prompt()
                     hide_cursor()
                     continue
 
@@ -1369,8 +1389,7 @@ def action_convert(config: dict):
                     print(f"{DIM}Selected Folder:{RESET} {FG_YELLOW}{folder_path}{RESET}\n")
 
                     if not gifs:
-                        print(f"{FG_YELLOW}[!] No .gif files found in: {folder_path}{RESET}")
-                        pause_prompt()
+                        status_banner = f"{FG_YELLOW}[!] No .gif files found in: {folder_path.name}{RESET}"
                         hide_cursor()
                         continue
 
@@ -1388,12 +1407,10 @@ def action_convert(config: dict):
                             output_dir=out_dir,
                             progress_callback=_progress,
                         )
-                        print(f"\n\n{FG_GREEN}[✓] Batch complete! Converted {len(created)} GIF(s) to MP4 in:{RESET}")
-                        print(f"    {out_dir}")
+                        status_banner = f"{FG_GREEN}[✓] Converted / Saved: {len(created)} MP4(s) in {out_dir.name}{RESET}"
                     except Exception as e:
-                        print(f"\n\n{FG_RED}[-] Batch conversion failed: {e}{RESET}")
+                        status_banner = f"{FG_RED}[-] Batch conversion failed: {e}{RESET}"
 
-                    pause_prompt()
                     hide_cursor()
                     continue
 
@@ -1410,7 +1427,7 @@ def action_convert(config: dict):
 
             input_path = browse_interactive_path(
                 mode="file",
-                title=f"Pick File for: {conv_options[choice_num][0][:28]}",
+                title=f"Pick File for: {conv_options[choice_num][1][:28]}",
                 allowed_exts=ext_filter,
             )
 
@@ -1419,49 +1436,48 @@ def action_convert(config: dict):
 
             clear_screen()
             show_cursor()
-            print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]} ==={RESET}")
+            print(f"\n{BOLD}{FG_CYAN}=== {conv_options[choice_num][0]}  {conv_options[choice_num][1]} ==={RESET}")
             print(f"{DIM}Selected Input:{RESET} {FG_GREEN}{input_path}{RESET}\n")
 
             try:
                 if choice_num == 1:  # Video -> MP3
                     out_mp3 = out_dir / f"{input_path.stem}.mp3"
-                    print(f"\n[+] Extracting MP3 audio...")
+                    print(f"[+] Extracting MP3 audio (320 kbps)...")
                     convert_video_to_audio(input_path, out_mp3, audio_format="mp3", bitrate="320k", progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_mp3}{RESET}")
+                    status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_mp3.name}{RESET}"
 
                 elif choice_num == 2:  # Audio ↔ Audio
-                    fmt = input("  Target audio format (mp3/aac/wav/flac/ogg/m4a/opus, default mp3): ").strip().lower() or "mp3"
+                    fmt = "aac" if input_path.suffix.lower() == ".mp3" else "mp3"
                     out_aud = out_dir / f"{input_path.stem}.{fmt}"
-                    print(f"\n[+] Converting audio to {fmt.upper()}...")
-                    convert_audio_to_audio(input_path, out_aud, audio_format=fmt, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_aud}{RESET}")
+                    print(f"[+] Converting audio to {fmt.upper()} (320 kbps)...")
+                    convert_audio_to_audio(input_path, out_aud, audio_format=fmt, bitrate="320k", progress_callback=_progress)
+                    status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_aud.name}{RESET}"
 
                 elif choice_num == 3:  # Text -> PDF
                     out_pdf = out_dir / f"{input_path.stem}.pdf"
-                    print(f"\n[+] Rendering Text Document to PDF...")
+                    print(f"[+] Rendering Text Document to PDF...")
                     convert_text_to_pdf(input_path, out_pdf, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_pdf}{RESET}")
+                    status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_pdf.name}{RESET}"
 
                 elif choice_num == 5:  # Image Format
-                    fmt = input("  Target format (png/jpg/webp/bmp/tiff, default png): ").strip().lower() or "png"
+                    fmt = "png" if input_path.suffix.lower() in (".jpg", ".jpeg", ".webp") else "jpg"
                     out_img = out_dir / f"{input_path.stem}.{fmt}"
-                    print(f"\n[+] Converting image...")
+                    print(f"[+] Converting image to {fmt.upper()}...")
                     convert_image(input_path, out_img, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_img}{RESET}")
+                    status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_img.name}{RESET}"
 
                 elif choice_num == 6:  # Remux / Transcode
-                    reencode_in = input("  Re-encode stream? [y/N, default N = fast remux]: ").strip().lower()
-                    reencode = reencode_in in ("y", "yes")
+                    reencode = False
                     out_vid = out_dir / f"{input_path.stem}_remux.mp4"
-                    print(f"\n[+] Processing video...")
+                    print(f"[+] Processing video (fast remux)...")
                     remux_or_transcode_video(input_path, out_vid, reencode=reencode, progress_callback=_progress)
-                    print(f"\n\n{FG_GREEN}[✓] Saved: {out_vid}{RESET}")
+                    status_banner = f"{FG_GREEN}[✓] Converted / Saved: {out_vid.name}{RESET}"
 
             except Exception as e:
-                print(f"\n\n{FG_RED}[-] Conversion failed: {e}{RESET}")
+                status_banner = f"{FG_RED}[-] Conversion failed: {e}{RESET}"
 
-            pause_prompt()
             hide_cursor()
+            continue
 
         elif key in ("ESC", "q", "Q"):
             break
@@ -1472,26 +1488,40 @@ def action_combine_videos(config: dict):
     from .converter import combine_videos
 
     selected_videos: list[Path] = []
+    selected_idx = 0
+    status_banner: str | None = None
     hide_cursor()
 
     while True:
         clear_screen()
         print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
         print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}🎞  COMBINE & MERGE VIDEOS{RESET}        {DIM}Fast zero-loss stream merger{RESET}  {BOLD}{FG_CYAN}│{RESET}")
-        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}")
+        if status_banner:
+            print(f"\n  {status_banner}\n")
+        else:
+            print()
 
         if selected_videos:
             print(f"{BOLD}Queued Video Clips ({len(selected_videos)} in sequence):{RESET}")
             total_sz = 0
-            for idx, vp in enumerate(selected_videos, 1):
+            for vp in selected_videos:
+                try:
+                    total_sz += vp.stat().st_size / (1024 * 1024)
+                except Exception:
+                    pass
+
+            max_disp = 8
+            for idx, vp in enumerate(selected_videos[:max_disp], 1):
                 try:
                     sz_mb = vp.stat().st_size / (1024 * 1024)
-                    total_sz += sz_mb
                     sz_str = f"[{sz_mb:.1f} MB]"
                 except Exception:
                     sz_str = ""
                 name_disp = vp.name if len(vp.name) <= 38 else vp.name[:35] + "..."
                 print(f"  {FG_CYAN}{idx:>2}.{RESET} {BOLD}{name_disp:<40}{RESET} {DIM}{sz_str}{RESET}")
+            if len(selected_videos) > max_disp:
+                print(f"  {DIM}  ... and {len(selected_videos) - max_disp} more clip(s){RESET}")
             print(f"  {DIM}Total estimated size: ~{total_sz:.1f} MB{RESET}\n")
         else:
             print(f"  {DIM}(No videos added yet. Add at least 2 videos to combine){RESET}\n")
@@ -1501,109 +1531,129 @@ def action_combine_videos(config: dict):
             ("📂", "Add All Videos from a Folder", "Bulk add all video files inside a chosen directory"),
             ("❌", "Remove Last Added Video", "Remove the most recently added clip from the queue"),
             ("🧹", "Clear Video Queue", "Reset and clear all selected videos"),
-            ("▶", "Start Combining Videos", f"Merge {len(selected_videos)} video(s) into one output file"),
-            ("←", "Back to Other Tools", "Return to utilities menu"),
+            ("▶", "Start Combining Videos", f"Merge {len(selected_videos)} video(s) into one output file" if len(selected_videos) >= 2 else "Requires at least 2 videos"),
+            ("←", "Back to Menu", "Return to previous menu"),
         ]
 
-        for i, (ico, name, desc) in enumerate(opts, 1):
-            num = i if i < len(opts) else 0
-            if i == 5 and len(selected_videos) < 2:
-                print(f"    {DIM}[{num}] {ico} {name:<32} — Requires at least 2 videos{RESET}")
+        for idx, (ico, name, desc) in enumerate(opts):
+            num = idx + 1 if idx < len(opts) - 1 else 0
+            title = f"{ico} {name}"
+            is_start_combine = (idx == 4)
+            disabled = is_start_combine and len(selected_videos) < 2
+            desc_text = "Requires at least 2 videos" if disabled else desc
+
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                if disabled:
+                    print(f"{prefix} {num_badge} {DIM}{title:<34} — {desc_text}{RESET}")
+                else:
+                    print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{title:<34}{RESET} {DIM}— {desc_text}{RESET}")
             else:
-                print(f"    {FG_CYAN}[{num}]{RESET} {ico} {BOLD}{name:<32}{RESET} {DIM}— {desc}{RESET}")
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                if disabled:
+                    print(f"{prefix} {num_badge} {DIM}{title:<34} — {desc_text}{RESET}")
+                else:
+                    print(f"{prefix} {num_badge} {FG_WHITE}{title:<34}{RESET} {DIM}— {desc_text}{RESET}")
 
         print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
-        print(f" {FG_GREEN}[1-5, 0]{RESET} Select Option  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-5, 0]{RESET} Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
 
         key = read_key()
-        if key in ("1", "➕"):
-            picked = browse_interactive_path(
-                mode="file",
-                title=f"Pick Video #{len(selected_videos) + 1} to Combine",
-                allowed_exts=VIDEO_EXTENSIONS,
-            )
-            if picked and picked.is_file():
-                selected_videos.append(picked)
-        elif key == "2":
-            folder = browse_interactive_path(
-                mode="folder",
-                title="Select Folder to Bulk-Add All Videos",
-            )
-            if folder and folder.is_dir():
-                found_vids = [
-                    p for p in sorted(folder.iterdir())
-                    if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
-                ]
-                if found_vids:
-                    selected_videos.extend(found_vids)
-                    print(f"\n{FG_GREEN}[✓] Added {len(found_vids)} videos from {folder.name}{RESET}")
-                    time.sleep(0.8)
-                else:
-                    print(f"\n{FG_YELLOW}[!] No video files found in {folder.name}{RESET}")
-                    time.sleep(1.0)
-        elif key == "3":
-            if selected_videos:
-                removed = selected_videos.pop()
-                print(f"\n{DIM}[-] Removed: {removed.name}{RESET}")
-                time.sleep(0.5)
-        elif key == "4":
-            selected_videos.clear()
-            print(f"\n{DIM}[+] Queue cleared.{RESET}")
-            time.sleep(0.5)
-        elif key == "5":
-            if len(selected_videos) < 2:
-                print(f"\n{FG_YELLOW}[!] Please add at least 2 videos to combine.{RESET}")
-                time.sleep(1.0)
-                continue
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(opts)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(opts)
+        elif key in ("1", "2", "3", "4", "5"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 5):
+            return None
 
-            clear_screen()
-            show_cursor()
-            print(f"\n{BOLD}{FG_CYAN}=== Combine {len(selected_videos)} Videos ==={RESET}\n")
-
-            conv_dir = get_tool_output_dir("converter", config)
-            default_name = f"combined_{selected_videos[0].stem}_{len(selected_videos)}clips.mp4"
-            out_name_in = input(f"Output filename [default: {default_name}]: ").strip()
-            out_name = out_name_in if out_name_in else default_name
-            if not out_name.lower().endswith(tuple(VIDEO_EXTENSIONS)):
-                out_name += ".mp4"
-
-            out_path = conv_dir / out_name
-
-            reencode_in = input(f"Force re-encode? (N = fast direct stream copy, y = re-encode) [y/N]: ").strip().lower()
-            reencode = reencode_in in ("y", "yes")
-
-            def _progress(pct: int, msg: str):
-                bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-                sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
-                sys.stdout.flush()
-
-            try:
-                print(f"\n{BOLD}[+] Starting video combine...{RESET}")
-                result = combine_videos(
-                    video_paths=selected_videos,
-                    output_path=out_path,
-                    reencode=reencode,
-                    progress_callback=_progress,
+        if key == "ENTER":
+            status_banner = None
+            if selected_idx == 0:
+                picked = browse_interactive_path(
+                    mode="file",
+                    title=f"Pick Video #{len(selected_videos) + 1} to Combine",
+                    allowed_exts=VIDEO_EXTENSIONS,
                 )
-                print(f"\n\n{FG_GREEN}[✓] Videos merged successfully!{RESET}")
-                print(f"    Saved to: {result}")
-
-                if config.get("auto_open", True):
-                    print(f"\n{FG_GREEN}[+] Opening combined video in media player...{RESET}")
-                    system_open(result)
+                if picked and picked.is_file():
+                    selected_videos.append(picked)
+                    status_banner = f"{FG_GREEN}[✓] Added: {picked.name}{RESET}"
+            elif selected_idx == 1:
+                folder = browse_interactive_path(
+                    mode="folder",
+                    title="Select Folder to Bulk-Add All Videos",
+                )
+                if folder and folder.is_dir():
+                    try:
+                        found_vids = [
+                            p for p in sorted(folder.iterdir())
+                            if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+                        ]
+                        if found_vids:
+                            selected_videos.extend(found_vids)
+                            status_banner = f"{FG_GREEN}[✓] Added {len(found_vids)} videos from {folder.name}{RESET}"
+                        else:
+                            status_banner = f"{FG_YELLOW}[!] No video files found in {folder.name}{RESET}"
+                    except Exception as err:
+                        status_banner = f"{FG_RED}[-] Could not read folder: {err}{RESET}"
+            elif selected_idx == 2:
+                if selected_videos:
+                    removed = selected_videos.pop()
+                    status_banner = f"{DIM}[-] Removed: {removed.name}{RESET}"
                 else:
-                    play_in = input(f"\n{BOLD}Open merged video now? [y/N]:{RESET} ").strip().lower()
-                    if play_in in ("y", "yes"):
+                    status_banner = f"{DIM}[!] Queue is already empty.{RESET}"
+            elif selected_idx == 3:
+                selected_videos.clear()
+                status_banner = f"{DIM}[+] Queue cleared.{RESET}"
+            elif selected_idx == 4:
+                if len(selected_videos) < 2:
+                    status_banner = f"{FG_YELLOW}[!] Please add at least 2 videos to combine.{RESET}"
+                    continue
+
+                clear_screen()
+                show_cursor()
+                print(f"\n{BOLD}{FG_CYAN}=== Combine {len(selected_videos)} Videos ==={RESET}\n")
+
+                conv_dir = get_tool_output_dir("converter", config)
+                stem_clean = safe_filename(selected_videos[0].stem) or "clip"
+                default_name = f"combined_{stem_clean}_{len(selected_videos)}clips.mp4"
+                out_path = conv_dir / default_name
+                resolved_inputs = {p.resolve() for p in selected_videos}
+                counter = 1
+                while out_path.resolve() in resolved_inputs:
+                    default_name = f"combined_{stem_clean}_{len(selected_videos)}clips_{counter}.mp4"
+                    out_path = conv_dir / default_name
+                    counter += 1
+
+                def _progress(pct: int, msg: str):
+                    bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
+                    sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+                    sys.stdout.flush()
+
+                try:
+                    print(f"[+] Starting video combine...")
+                    result = combine_videos(
+                        video_paths=selected_videos,
+                        output_path=out_path,
+                        reencode=False,
+                        progress_callback=_progress,
+                    )
+                    print(f"\n\n{FG_GREEN}[✓] Videos merged successfully!{RESET}")
+                    print(f"    Saved to: {result}")
+
+                    if config.get("auto_open", True):
                         system_open(result)
 
-            except Exception as err:
-                print(f"\n\n{FG_RED}[-] Video combine failed: {err}{RESET}")
-
-            pause_prompt()
-            hide_cursor()
-
-        elif key in ("0", "ESC", "q", "Q"):
-            break
+                    hide_cursor()
+                    return result
+                except Exception as err:
+                    print(f"\n\n{FG_RED}[-] Video combine failed: {err}{RESET}")
+                    hide_cursor()
+                    raise
 
 
 def action_comic_scraper(config: dict):

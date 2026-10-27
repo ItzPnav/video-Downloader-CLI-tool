@@ -25,9 +25,11 @@ class TestOcrEngine(unittest.TestCase):
             img = Image.new("RGB", (100, 100), color="white")
             img.save(img_path)
 
+            mock_pyt = MagicMock()
+            mock_pyt.image_to_string.return_value = "Hello World from OCR"
             with patch("video_downloader.ocr.find_tesseract_binary", return_value="C:\\Tesseract\\tesseract.exe"), \
                  patch("video_downloader.ocr.PYTESSERACT_AVAILABLE", True), \
-                 patch("pytesseract.image_to_string", return_value="Hello World from OCR"):
+                 patch("video_downloader.ocr.pytesseract", mock_pyt, create=True):
                 text = extract_text_from_image(img_path)
                 self.assertEqual(text, "Hello World from OCR")
 
