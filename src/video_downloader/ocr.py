@@ -131,6 +131,7 @@ def run_ocr(
     lang: str = "eng",
     combine_output: bool = True,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: str = "ascending",
 ) -> Tuple[bool, Path, str]:
     """
     Perform OCR on a single image, list of images, or directory of images.
@@ -165,7 +166,11 @@ def run_ocr(
             for f in p.iterdir():
                 if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS:
                     image_paths.append(f)
-            image_paths.sort(key=lambda x: natural_sort_key(x.name))
+            if order == "random":
+                import random
+                random.shuffle(image_paths)
+            else:
+                image_paths.sort(key=lambda x: natural_sort_key(x.name))
         else:
             raise FileNotFoundError(f"Target not found: {target}")
 

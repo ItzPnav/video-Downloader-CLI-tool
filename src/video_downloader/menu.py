@@ -1148,6 +1148,62 @@ def prompt_single_or_folder_mode(
                 return "folder"
 
 
+def prompt_merge_order_mode(
+    header_title: str = "MERGE SEQUENCE ORDER",
+    item_type: str = "items",
+) -> str | None:
+    """
+    Prompt user with an arrow-key & number-key submenu to choose between
+    merging items in ascending sorted order ('ascending') or random order ('random').
+    Returns 'ascending', 'random', or None if cancelled.
+    """
+    options = [
+        ("🔤", "File Sorted Ascending", f"Sort {item_type} in natural numerical / alphabetical order (A-Z, 0-9)"),
+        ("🎲", "Random Shuffle", f"Randomize and shuffle the order of {item_type}"),
+        ("←", "Cancel / Back", "Return to previous menu"),
+    ]
+    selected_idx = 0
+    hide_cursor()
+
+    while True:
+        clear_screen()
+        print(f"{BOLD}{FG_CYAN}╭─────────────────────────────────────────────────────────────╮{RESET}")
+        print(f"{BOLD}{FG_CYAN}│{RESET}  {BOLD}{header_title:<36}{RESET}  {DIM}Select Sequence Mode{RESET}  {BOLD}{FG_CYAN}│{RESET}")
+        print(f"{BOLD}{FG_CYAN}╰─────────────────────────────────────────────────────────────╯{RESET}\n")
+        print(f" {DIM}Choose how to order the {item_type} before merging:{RESET}\n")
+
+        for idx, (icon, title, desc) in enumerate(options):
+            num = idx + 1 if idx < len(options) - 1 else 0
+            if idx == selected_idx:
+                prefix = f" {BOLD}{FG_CYAN}▶{RESET}"
+                num_badge = f"{BOLD}{BG_CYAN}{FG_BLACK} {num} {RESET}"
+                print(f"{prefix} {num_badge} {BOLD}{FG_CYAN}{icon}  {title:<26}{RESET} {DIM}— {desc}{RESET}")
+            else:
+                prefix = "   "
+                num_badge = f"{DIM}[{num}]{RESET}"
+                print(f"{prefix} {num_badge} {FG_WHITE}{icon}  {title:<26}{RESET} {DIM}— {desc}{RESET}")
+
+        print(f"\n{DIM}─────────────────────────────────────────────────────────────{RESET}")
+        print(f" {FG_CYAN}[↑/↓]{RESET} Navigate  {DIM}•{RESET} {FG_GREEN}[Enter]{RESET} Select  {DIM}•{RESET} {FG_YELLOW}[1-2, 0]{RESET} Quick Jump  {DIM}•{RESET} {FG_RED}[Esc/q]{RESET} Back")
+
+        key = read_key()
+        if key == "UP":
+            selected_idx = (selected_idx - 1) % len(options)
+        elif key == "DOWN":
+            selected_idx = (selected_idx + 1) % len(options)
+        elif key in ("1", "2"):
+            selected_idx = int(key) - 1
+            key = "ENTER"
+        elif key in ("0", "ESC", "q", "Q") or (key == "ENTER" and selected_idx == 2):
+            return None
+
+        if key == "ENTER":
+            if selected_idx == 0:
+                return "ascending"
+            elif selected_idx == 1:
+                return "random"
+
+
 def action_convert(config: dict):
     """Sub-Action: Interactive Media Converter."""
     from .converter import (
@@ -1614,9 +1670,28 @@ def action_combine_videos(config: dict):
                     status_banner = f"{FG_YELLOW}[!] Please add at least 2 videos to combine.{RESET}"
                     continue
 
+                order_choice = prompt_merge_order_mode(
+                    header_title="🎞  COMBINE & MERGE VIDEOS",
+                    item_type="videos",
+                )
+                if not order_choice:
+                    continue
+
+                if order_choice == "ascending":
+                    def _nat_key(p: Path):
+                        return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", p.name)]
+                    selected_videos = sorted(selected_videos, key=_nat_key)
+                elif order_choice == "random":
+                    import random
+                    random.shuffle(selected_videos)
+
                 clear_screen()
                 show_cursor()
-                print(f"\n{BOLD}{FG_CYAN}=== Combine {len(selected_videos)} Videos ==={RESET}\n")
+                print(f"\n{BOLD}{FG_CYAN}=== Combine {len(selected_videos)} Videos ({order_choice.title()} Order) ==={RESET}\n")
+                print(f"[+] Ordered sequence to merge:")
+                for i, v in enumerate(selected_videos, 1):
+                    print(f"    {i:>2}. {v.name}")
+                print()
 
                 conv_dir = get_tool_output_dir("converter", config)
                 stem_clean = safe_filename(selected_videos[0].stem) or "clip"
@@ -1641,6 +1716,7 @@ def action_combine_videos(config: dict):
                         output_path=out_path,
                         reencode=False,
                         progress_callback=_progress,
+                        order=order_choice,
                     )
                     print(f"\n\n{FG_GREEN}[✓] Videos merged successfully!{RESET}")
                     print(f"    Saved to: {result}")
@@ -1770,6 +1846,14 @@ def _run_comic_scrape_flow(config: dict, source: str):
         return
 
     auto_format = "pdf" if opt == "2" else ("cbz" if opt == "3" else None)
+    order_choice = "ascending"
+    if auto_format:
+        order_choice = prompt_merge_order_mode(
+            header_title="📚  COMIC & GALLERY SCRAPER",
+            item_type="pages",
+        )
+        if not order_choice:
+            return
 
     print(f"\n{BOLD}Cookie File for Authentication [Optional]:{RESET}")
     print(f"  {DIM}Press Enter to skip, or enter .txt path, or [b] to browse disk{RESET}")
@@ -1801,6 +1885,7 @@ def _run_comic_scrape_flow(config: dict, source: str):
             auto_format=auto_format,
             cookie_file=cookie_file,
             progress_callback=_progress,
+            order=order_choice,
         )
         print(f"\n\n{FG_GREEN}[✓] Extraction finished successfully!{RESET}")
         print(f"    Saved to: {res}")
@@ -1842,6 +1927,13 @@ def _run_pack_images_flow(config: dict):
 
     target_fmt = "cbz" if fmt_choice == "2" else "pdf"
 
+    order_choice = prompt_merge_order_mode(
+        header_title="📦  IMAGES TO PDF / CBZ PACKAGER",
+        item_type="images",
+    )
+    if not order_choice:
+        return
+
     recurse_in = input(f"\n{BOLD}Recurse into nested subfolders? [y/N]:{RESET} ").strip().lower()
     recurse = recurse_in in ("y", "yes")
 
@@ -1854,15 +1946,15 @@ def _run_pack_images_flow(config: dict):
         out_dir = get_tool_output_dir("packager", config)
         print(f"\n{BOLD}[+] Packaging images...{RESET}")
         if recurse:
-            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
+            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress, order=order_choice)
             print(f"\n\n{FG_GREEN}[✓] Batch complete! Created {len(created)} {target_fmt.upper()} archives in:{RESET}")
             print(f"    {out_dir}")
         else:
             out_file = out_dir / f"{folder.name}.{target_fmt}"
             if target_fmt == "cbz":
-                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
+                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress, order=order_choice)
             else:
-                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
+                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress, order=order_choice)
 
             if ok:
                 print(f"\n\n{FG_GREEN}[✓] Successfully created {target_fmt.upper()} ({count} pages):{RESET}")
@@ -1956,6 +2048,15 @@ def _run_ocr_flow(config: dict):
     combine_in = input(f"{BOLD}Combine into single .txt file? [Y/n]:{RESET} ").strip().lower()
     combine = combine_in not in ("n", "no")
 
+    order_choice = "ascending"
+    if target_path.is_dir() and combine:
+        order_choice = prompt_merge_order_mode(
+            header_title="🔍  OCR — IMAGE TO TEXT EXTRACTOR",
+            item_type="images",
+        )
+        if not order_choice:
+            return
+
     def _progress(pct: int, msg: str):
         bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
         sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
@@ -1969,6 +2070,7 @@ def _run_ocr_flow(config: dict):
             lang=lang_in,
             combine_output=combine,
             progress_callback=_progress,
+            order=order_choice,
         )
         print(f"\n\n{FG_GREEN}[✓] OCR Extraction Successful!{RESET}")
         print(f"    Output: {out_path}\n")

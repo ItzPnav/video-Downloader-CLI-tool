@@ -25,8 +25,8 @@ def natural_sort_key(s: str) -> list:
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)]
 
 
-def get_sorted_images_in_folder(folder_path: str | Path) -> List[Path]:
-    """Return naturally sorted list of image Paths in a folder."""
+def get_sorted_images_in_folder(folder_path: str | Path, order: str = "ascending") -> List[Path]:
+    """Return list of image Paths in a folder, sorted ascending or random."""
     p = Path(folder_path)
     if not p.is_dir():
         return []
@@ -35,7 +35,11 @@ def get_sorted_images_in_folder(folder_path: str | Path) -> List[Path]:
         f for f in p.iterdir()
         if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
     ]
-    images.sort(key=lambda x: natural_sort_key(x.name))
+    if order == "random":
+        import random
+        random.shuffle(images)
+    else:
+        images.sort(key=lambda x: natural_sort_key(x.name))
     return images
 
 
@@ -43,6 +47,7 @@ def images_to_pdf(
     folder_path: str | Path,
     output_pdf_path: str | Path,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: str = "ascending",
 ) -> Tuple[bool, int]:
     """
     Bundle all image files in a folder into a single multi-page PDF using Pillow.
@@ -55,7 +60,7 @@ def images_to_pdf(
     output_pdf_path = Path(output_pdf_path)
     output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-    image_files = get_sorted_images_in_folder(folder_path)
+    image_files = get_sorted_images_in_folder(folder_path, order=order)
     if not image_files:
         return False, 0
 
@@ -115,6 +120,7 @@ def images_to_cbz(
     folder_path: str | Path,
     output_cbz_path: str | Path,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: str = "ascending",
 ) -> Tuple[bool, int]:
     """
     Bundle all image files in a folder into a standard Comic Book Zip archive (.cbz).
@@ -124,7 +130,7 @@ def images_to_cbz(
     output_cbz_path = Path(output_cbz_path)
     output_cbz_path.parent.mkdir(parents=True, exist_ok=True)
 
-    image_files = get_sorted_images_in_folder(folder_path)
+    image_files = get_sorted_images_in_folder(folder_path, order=order)
     if not image_files:
         return False, 0
 
@@ -152,6 +158,7 @@ def batch_pack_folders(
     format_type: str = "pdf",
     recurse: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: str = "ascending",
 ) -> List[Path]:
     """
     Scan root_dir for folders containing images and convert each folder into a separate PDF or CBZ.
@@ -172,7 +179,7 @@ def batch_pack_folders(
         target_folders.sort(key=lambda p: natural_sort_key(p.name))
 
     # Also check if root itself contains images directly
-    root_images = get_sorted_images_in_folder(root)
+    root_images = get_sorted_images_in_folder(root, order=order)
     if root_images and root not in target_folders:
         target_folders.insert(0, root)
 
@@ -187,9 +194,9 @@ def batch_pack_folders(
             progress_callback(int(((i - 1) / total) * 100), f"Processing ({i}/{total}): {folder_name}")
 
         if format_type == "cbz":
-            ok, count = images_to_cbz(folder, out_file)
+            ok, count = images_to_cbz(folder, out_file, order=order)
         else:
-            ok, count = images_to_pdf(folder, out_file)
+            ok, count = images_to_pdf(folder, out_file, order=order)
 
         if ok:
             created_files.append(out_file)

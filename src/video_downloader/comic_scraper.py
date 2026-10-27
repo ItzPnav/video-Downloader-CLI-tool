@@ -222,6 +222,7 @@ def scrape_and_download_comic(
     cookie_file: Optional[Union[str, Path]] = None,
     respect_robots: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: str = "ascending",
 ) -> Path:
     """
     Scrape comic/image gallery from a local HTML file, image directory, or live web URL.
@@ -255,11 +256,11 @@ def scrape_and_download_comic(
             fmt = auto_format.lower().lstrip(".")
             if fmt == "cbz":
                 cbz_path = output_base_dir / f"{folder_title}.cbz"
-                images_to_cbz(chapter_dir, cbz_path)
+                images_to_cbz(chapter_dir, cbz_path, order=order)
                 return cbz_path
             elif fmt == "pdf":
                 pdf_path = output_base_dir / f"{folder_title}.pdf"
-                images_to_pdf(chapter_dir, pdf_path)
+                images_to_pdf(chapter_dir, pdf_path, order=order)
                 return pdf_path
 
         return chapter_dir
@@ -348,13 +349,13 @@ def scrape_and_download_comic(
 
         if fmt == "cbz":
             cbz_path = output_base_dir / f"{folder_title}.cbz"
-            images_to_cbz(chapter_dir, cbz_path)
+            images_to_cbz(chapter_dir, cbz_path, order=order)
             if progress_callback:
                 progress_callback(100, f"Complete! Saved CBZ: {cbz_path.name}")
             return cbz_path
         elif fmt == "pdf":
             pdf_path = output_base_dir / f"{folder_title}.pdf"
-            images_to_pdf(chapter_dir, pdf_path)
+            images_to_pdf(chapter_dir, pdf_path, order=order)
             if progress_callback:
                 progress_callback(100, f"Complete! Saved PDF: {pdf_path.name}")
             return pdf_path

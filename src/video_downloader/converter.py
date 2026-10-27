@@ -1106,6 +1106,7 @@ def combine_videos(
     output_path: str | Path,
     reencode: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    order: Optional[str] = None,
 ) -> Path:
     """
     Concatenate and merge multiple video files into a single unified video file.
@@ -1132,6 +1133,14 @@ def combine_videos(
             raise FileNotFoundError(f"Video file not found: {p}")
         if p.stat().st_size == 0:
             raise ValueError(f"Input video file is empty: {p.name}")
+
+    if order == "ascending":
+        def _nat_sort_key(p: Path):
+            return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", p.name)]
+        valid_paths = sorted(valid_paths, key=_nat_sort_key)
+    elif order == "random":
+        import random
+        random.shuffle(valid_paths)
 
     output_path = Path(output_path).resolve()
     if output_path.is_dir():

@@ -362,7 +362,7 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
         # - "1" (add clip1)
         # - "1" (add clip2)
         # - "DOWN", "DOWN", "DOWN", "DOWN", "ENTER" (navigate from 0 to 4: Start Combining Videos)
-        keys = ["1", "1", "DOWN", "DOWN", "DOWN", "DOWN", "ENTER"]
+        keys = ["1", "1", "DOWN", "DOWN", "DOWN", "DOWN", "ENTER", "1"]
         browse_mock = MagicMock(side_effect=[vid1, vid2])
 
         with patch("video_downloader.menu.read_key", side_effect=keys), \
@@ -751,7 +751,7 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
         # Step 1: Add weird clip via file browser (key "1")
         # Step 2: Add all 10 folder clips via folder browser (key "2")
         # Step 3: Combine clips (key "5")
-        keys = ["1", "2", "5"]
+        keys = ["1", "2", "5", "1"]
         with patch("video_downloader.menu.read_key", side_effect=keys), \
              patch("video_downloader.menu.browse_interactive_path", side_effect=[mock_weird_clip, self.test_dir]), \
              patch("video_downloader.menu.clear_screen"), \
@@ -831,7 +831,7 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
         colliding_clip = conv_dir / "combined_clipA_2clips.mp4"
         colliding_clip.write_bytes(b"existing_clip")
 
-        with patch("video_downloader.menu.read_key", side_effect=["1", "1", "5"]), \
+        with patch("video_downloader.menu.read_key", side_effect=["1", "1", "5", "1"]), \
              patch("video_downloader.menu.browse_interactive_path", side_effect=[vid1, colliding_clip]), \
              patch("video_downloader.menu.clear_screen"), \
              patch("video_downloader.converter.combine_videos", return_value=Path("out.mp4")) as mock_comb, \
@@ -906,7 +906,7 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
             rel_vid1 = Path("clipA.mp4")
             rel_colliding = Path("combined_clipA_2clips.mp4")
 
-            with patch("video_downloader.menu.read_key", side_effect=["1", "1", "5"]), \
+            with patch("video_downloader.menu.read_key", side_effect=["1", "1", "5", "1"]), \
                  patch("video_downloader.menu.browse_interactive_path", side_effect=[rel_vid1, rel_colliding]), \
                  patch("video_downloader.menu.clear_screen"), \
                  patch("video_downloader.converter.combine_videos", return_value=Path("out.mp4")) as mock_comb, \
@@ -939,6 +939,68 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
         out_text = captured_output.getvalue()
         self.assertIn("Video combine failed: FFmpeg combine exploded", out_text)
 
+
+
+    def test_prompt_merge_order_mode_arrow_keys_and_selection(self):
+        """Test prompt_merge_order_mode navigation with arrows and enter."""
+        from video_downloader.menu import prompt_merge_order_mode
+
+        # Test selecting option 1 (ascending) via ENTER
+        with patch("video_downloader.menu.read_key", side_effect=["ENTER"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertEqual(res, "ascending")
+
+        # Test selecting option 2 (random) via DOWN, then ENTER
+        with patch("video_downloader.menu.read_key", side_effect=["DOWN", "ENTER"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertEqual(res, "random")
+
+        # Test quick jump keys '1' and '2'
+        with patch("video_downloader.menu.read_key", side_effect=["1"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertEqual(res, "ascending")
+
+        with patch("video_downloader.menu.read_key", side_effect=["2"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertEqual(res, "random")
+
+        # Test cancel via ESC / 0 / q
+        with patch("video_downloader.menu.read_key", side_effect=["ESC"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertIsNone(res)
+
+        with patch("video_downloader.menu.read_key", side_effect=["0"]), \
+             patch("video_downloader.menu.clear_screen"):
+            res = prompt_merge_order_mode("TEST HEADER", "items")
+            self.assertIsNone(res)
+
+    def test_action_combine_videos_random_order_selection(self):
+        """Test action_combine_videos when user selects random shuffle order (option 2)."""
+        from video_downloader.menu import action_combine_videos
+
+        vid1 = self.test_dir / "clip1.mp4"
+        vid2 = self.test_dir / "clip2.mp4"
+        vid1.write_bytes(b"vid1")
+        vid2.write_bytes(b"vid2")
+
+        # Sequence: Add vid1 ('1'), Add vid2 ('1'), Start combine ('5'), Pick Random ('2')
+        keys = ["1", "1", "5", "2"]
+        with patch("video_downloader.menu.read_key", side_effect=keys), \
+             patch("video_downloader.menu.browse_interactive_path", side_effect=[vid1, vid2]), \
+             patch("video_downloader.menu.clear_screen"), \
+             patch("video_downloader.converter.combine_videos", return_value=Path("out.mp4")) as mock_comb, \
+             patch("video_downloader.utils.load_config", return_value=self.cfg):
+
+            ret = action_combine_videos(self.cfg)
+            self.assertIsNotNone(ret)
+            mock_comb.assert_called_once()
+            # Verify order='random' passed to combine_videos
+            self.assertEqual(mock_comb.call_args.kwargs.get("order"), "random")
 
 if __name__ == "__main__":
     unittest.main()

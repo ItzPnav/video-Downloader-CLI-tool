@@ -591,6 +591,7 @@ def run_cli_combine(args: list) -> int:
     input_files = []
     custom_out = None
     reencode = False
+    order = "ascending"
 
     idx = 0
     while idx < len(args):
@@ -602,6 +603,15 @@ def run_cli_combine(args: list) -> int:
             custom_out = Path(a.split("=", 1)[1])
         elif a in ("--reencode", "--re-encode"):
             reencode = True
+        elif a in ("--order", "-o") and idx + 1 < len(args):
+            order = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--order="):
+            order = a.split("=", 1)[1].lower()
+        elif a in ("--sort", "--ascending"):
+            order = "ascending"
+        elif a in ("--random", "--shuffle"):
+            order = "random"
         elif not a.startswith("-"):
             p = Path(a)
             if not p.is_file():
@@ -629,7 +639,7 @@ def run_cli_combine(args: list) -> int:
         print(f"  [{pct:>3}%] {msg}")
 
     try:
-        combine_videos(input_files, custom_out, reencode=reencode, progress_callback=_progress)
+        combine_videos(input_files, custom_out, reencode=reencode, progress_callback=_progress, order=order)
         print(f"\n[✓] Successfully combined {len(input_files)} videos into: {custom_out}\n")
         return 0
     except Exception as e:
@@ -652,6 +662,7 @@ def run_cli_comic(args: list) -> int:
     custom_out = None
     cookie_file = None
     respect_robots = False
+    order = "ascending"
 
     idx = 1
     while idx < len(args):
@@ -665,6 +676,15 @@ def run_cli_comic(args: list) -> int:
             idx += 1
         elif a == "--respect-robots":
             respect_robots = True
+        elif a in ("--order", "-o") and idx + 1 < len(args):
+            order = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--order="):
+            order = a.split("=", 1)[1].lower()
+        elif a in ("--sort", "--ascending"):
+            order = "ascending"
+        elif a in ("--random", "--shuffle"):
+            order = "random"
         elif a == "--out" and idx + 1 < len(args):
             custom_out = Path(args[idx + 1])
             idx += 1
@@ -687,6 +707,7 @@ def run_cli_comic(args: list) -> int:
             cookie_file=cookie_file,
             respect_robots=respect_robots,
             progress_callback=_progress,
+            order=order,
         )
         print(f"\n[✓] Scraping complete! Output: {result_path}\n")
         return 0
@@ -708,6 +729,7 @@ def run_cli_ocr(args: list) -> int:
     lang = "eng"
     combine_output = True
     custom_out = None
+    order = "ascending"
 
     idx = 1
     while idx < len(args):
@@ -719,6 +741,15 @@ def run_cli_ocr(args: list) -> int:
             lang = a.split("=", 1)[1]
         elif a in ("--separate", "--no-combine"):
             combine_output = False
+        elif a in ("--order", "-o") and idx + 1 < len(args):
+            order = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--order="):
+            order = a.split("=", 1)[1].lower()
+        elif a in ("--sort", "--ascending"):
+            order = "ascending"
+        elif a in ("--random", "--shuffle"):
+            order = "random"
         elif a == "--out" and idx + 1 < len(args):
             custom_out = Path(args[idx + 1])
             idx += 1
@@ -738,6 +769,7 @@ def run_cli_ocr(args: list) -> int:
             lang=lang,
             combine_output=combine_output,
             progress_callback=_progress,
+            order=order,
         )
         print(f"\n[✓] OCR finished successfully! Saved to: {out_path}\n")
         if preview:
@@ -785,6 +817,7 @@ def run_cli_pack(args: list) -> int:
     target_fmt = "pdf"
     recurse = False
     custom_out = None
+    order = "ascending"
 
     idx = 1
     while idx < len(args):
@@ -794,6 +827,15 @@ def run_cli_pack(args: list) -> int:
             idx += 1
         elif a == "--recurse":
             recurse = True
+        elif a in ("--order", "-o") and idx + 1 < len(args):
+            order = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--order="):
+            order = a.split("=", 1)[1].lower()
+        elif a in ("--sort", "--ascending"):
+            order = "ascending"
+        elif a in ("--random", "--shuffle"):
+            order = "random"
         elif a == "--out" and idx + 1 < len(args):
             custom_out = Path(args[idx + 1])
             idx += 1
@@ -811,14 +853,14 @@ def run_cli_pack(args: list) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
 
         if recurse:
-            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress)
+            created = batch_pack_folders(folder, out_dir, format_type=target_fmt, recurse=True, progress_callback=_progress, order=order)
             print(f"\n[✓] Pack complete! Created {len(created)} {target_fmt.upper()} files in: {out_dir}\n")
         else:
             out_file = out_dir / f"{folder.name}.{target_fmt}"
             if target_fmt == "cbz":
-                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress)
+                ok, count = images_to_cbz(folder, out_file, progress_callback=_progress, order=order)
             else:
-                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress)
+                ok, count = images_to_pdf(folder, out_file, progress_callback=_progress, order=order)
 
             if ok:
                 print(f"\n[✓] Pack complete ({count} pages): {out_file}\n")

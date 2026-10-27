@@ -1054,6 +1054,86 @@ class TestConverterExtended(unittest.TestCase):
             self.assertTrue(verify_video_integrity(res_re))
 
 
+
+    def test_combine_videos_order_ascending_and_random(self):
+        """Verify combine_videos orders input clips ascendingly or randomly according to order argument."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import combine_videos
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            c1 = tmp_path / "clip1.mp4"
+            c2 = tmp_path / "clip2.mp4"
+            c10 = tmp_path / "clip10.mp4"
+            for p in (c1, c2, c10):
+                p.write_bytes(b"dummy video data")
+
+            out_merged = tmp_path / "merged.mp4"
+
+            # Mock probe_clip and FFmpeg subprocess to test path ordering
+            probed_paths = []
+            def fake_probe(p, ffprobe):
+                from video_downloader.converter import ClipProbeInfo, VideoStreamInfo
+                probed_paths.append(p)
+                return ClipProbeInfo(
+                    path=p,
+                    duration=1.0,
+                    video=VideoStreamInfo(
+                        width=320, height=240, codec_name="h264",
+                        avg_frame_rate="25/1", r_frame_rate="25/1",
+                        pix_fmt="yuv420p", time_base="1/25"
+                    ),
+                    audio=None
+                )
+
+            with patch("video_downloader.converter.probe_clip", side_effect=fake_probe), \
+                 patch("video_downloader.converter.verify_video_integrity", return_value=True), \
+                 patch("subprocess.Popen") as mock_popen, \
+                 patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.find_ffprobe", return_value="ffprobe"):
+
+                mock_proc = MagicMock()
+                mock_proc.stderr = []
+                mock_proc.wait.return_value = 0
+                mock_proc.returncode = 0
+                mock_popen.return_value = mock_proc
+
+                # Test 1: order='ascending' with out-of-order input: [c10, c2, c1]
+                probed_paths.clear()
+                combine_videos([c10, c2, c1], out_merged, order="ascending")
+                # Ascending natural order must be c1, c2, c10
+                self.assertEqual([p.name for p in probed_paths], ["clip1.mp4", "clip2.mp4", "clip10.mp4"])
+
+                # Test 2: order='random' with 10 clips
+                clips_10 = [tmp_path / f"video_{i:02d}.mp4" for i in range(15)]
+                for p in clips_10:
+                    p.write_bytes(b"data")
+                probed_paths.clear()
+                combine_videos(clips_10, out_merged, order="random")
+                # Ensure all 15 clips present and probed
+                self.assertEqual(len(probed_paths), 15)
+
+    def test_packager_order_ascending_and_random(self):
+        """Verify get_sorted_images_in_folder in packager sorts naturally or randomizes."""
+        from video_downloader.packager import get_sorted_images_in_folder
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            img1 = tmp_path / "page_1.png"
+            img2 = tmp_path / "page_2.png"
+            img10 = tmp_path / "page_10.png"
+            for p in (img1, img2, img10):
+                p.write_bytes(b"fake image data")
+
+            # Ascending natural sort
+            asc = get_sorted_images_in_folder(tmp_path, order="ascending")
+            self.assertEqual([p.name for p in asc], ["page_1.png", "page_2.png", "page_10.png"])
+
+            # Random order
+            rnd = get_sorted_images_in_folder(tmp_path, order="random")
+            self.assertEqual(len(rnd), 3)
+            self.assertEqual(set(p.name for p in rnd), {"page_1.png", "page_2.png", "page_10.png"})
+
 if __name__ == "__main__":
     unittest.main()
 
