@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "download_directory": "C:\\pnav\\extra\\others\\projects\\combine proj",
+  "download_directory": "/sdcard/Download",
   "preferred_format": "bv*+ba/b",
   "merge_format": "mp4",
   "browser_wait_seconds": 8,
@@ -8,7 +8,7 @@
   "use_static_scanner": true,
   "use_browser": true,
   "use_scrapling": true,
-  "race_timeout": 120,
+  "race_timeout": 20,
   "confidence_threshold": 50,
   "spawn_terminals": false,
   "browser_grace_seconds": 2.5,
@@ -20,6 +20,5 @@
     "repository": "",
     "branch": "main"
   },
-  "conflict_policy": "keep_both",
-  "comic_output_directory": "C:\\pnav\\extra\\others\\comic"
+  "conflict_policy": "keep_both"
 }

@@ -210,7 +210,10 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
                     pass
             if resolved_path.is_file():
                 return str(resolved_path)
-            video_files = [p for p in download_dir.glob("*.mp4") if p.is_file()]
+            video_files = [
+                p for p in download_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in (".mp4", ".webm", ".mkv", ".mov")
+            ]
             if video_files:
                 latest = max(video_files, key=lambda p: p.stat().st_mtime)
                 return str(latest)

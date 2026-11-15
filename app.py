@@ -7,6 +7,8 @@ import gradio as gr
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 import video_downloader.downloader as dl_mod
+import video_downloader.site_extractor as se_mod
+import video_downloader.utils as utils_mod
 from video_downloader.downloader import download
 from video_downloader.race_controller import ExtractionRaceController
 from video_downloader.router import identify
@@ -32,8 +34,13 @@ def extract_and_download(url: str, quality: str):
         raise gr.Error("No downloadable media found for this URL.")
 
     dl_dir = Path(tempfile.mkdtemp(prefix="toolkit_hf_"))
-    orig_get_dir = dl_mod.get_download_dir
-    dl_mod.get_download_dir = lambda: dl_dir
+    orig_utils_get_dir = utils_mod.get_download_dir
+    orig_dl_get_dir = dl_mod.get_download_dir
+    orig_se_get_dir = se_mod.get_download_dir
+    patch_get_dir = lambda: dl_dir
+    utils_mod.get_download_dir = patch_get_dir
+    dl_mod.get_download_dir = patch_get_dir
+    se_mod.get_download_dir = patch_get_dir
     try:
         out_path = download(
             result.candidate,
@@ -42,7 +49,9 @@ def extract_and_download(url: str, quality: str):
             conflict_policy="replace",
         )
     finally:
-        dl_mod.get_download_dir = orig_get_dir
+        utils_mod.get_download_dir = orig_utils_get_dir
+        dl_mod.get_download_dir = orig_dl_get_dir
+        se_mod.get_download_dir = orig_se_get_dir
 
     if not out_path or not Path(out_path).is_file():
         raise gr.Error("Extraction succeeded, but downloading the stream failed.")
