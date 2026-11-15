@@ -5,8 +5,10 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-/* 1. ROOT DESIGN TOKENS (CYBER TERMINAL DARK) */
-:root {
+/* 1. ROOT DESIGN TOKENS (CYBER TERMINAL DARK) & QUASAR ANTI-BLUE OVERRIDES */
+:root,
+body,
+body.body--dark {
   --bg: #0A0D10;
   --panel: #11161A;
   --panel-2: #151B20;
@@ -25,11 +27,23 @@
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-smooth: 300ms;
+
+  /* Eliminate Quasar default blue theme variables globally */
+  --q-primary: #FFB627 !important;
+  --q-secondary: #151B20 !important;
+  --q-accent: #39FF88 !important;
+  --q-positive: #39FF88 !important;
+  --q-negative: #FF5C4D !important;
+  --q-info: #FFB627 !important;
+  --q-warning: #FFB627 !important;
+  --q-dark: #11161A !important;
+  --q-dark-page: #0A0D10 !important;
 }
 
 /* 2. SOLAR LIGHT TOKENS (DESERT OPS) */
 [data-theme="light"],
-.theme-desert-ops {
+.theme-desert-ops,
+body.body--light {
   --bg: #EDEDE9;
   --panel: #F5EBE0;
   --panel-2: #E3D5CA;
@@ -42,6 +56,14 @@
   --amber-dim: #8A520B;
   --red: #C43D2F;
   --grid: rgba(160, 145, 130, 0.16);
+
+  --q-primary: #B8731D !important;
+  --q-secondary: #E3D5CA !important;
+  --q-accent: #2B824E !important;
+  --q-positive: #2B824E !important;
+  --q-negative: #C43D2F !important;
+  --q-info: #B8731D !important;
+  --q-warning: #B8731D !important;
 }
 
 /* 3. ZERO-RADIUS MANDATE & BOX SIZING */
@@ -189,6 +211,100 @@ select,
   }
 }
 
+/* Step 1: Mechanical Click Compression + Shockwave Ring */
+@keyframes mcClickCompress {
+  0% {
+    transform: scale(1) translateY(0);
+    box-shadow: 0 0 0 0 rgba(255, 182, 39, 0.85), inset 0 0 14px rgba(255, 182, 39, 0.55);
+  }
+  30% {
+    transform: scale(0.94) translateY(1.5px);
+    box-shadow: 0 0 0 3px rgba(255, 182, 39, 0.65), inset 0 0 18px rgba(255, 182, 39, 0.45);
+  }
+  70% {
+    transform: scale(1.02) translateY(0);
+    box-shadow: 0 0 0 6px rgba(255, 182, 39, 0.18), 0 0 12px rgba(255, 182, 39, 0.35);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    box-shadow: 0 0 0 8px rgba(255, 182, 39, 0);
+  }
+}
+
+@keyframes mcClickDanger {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 92, 77, 0.85), inset 0 0 14px rgba(255, 92, 77, 0.55);
+  }
+  30% {
+    transform: scale(0.94) translateY(1.5px);
+    box-shadow: 0 0 0 3px rgba(255, 92, 77, 0.65);
+  }
+  70% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 6px rgba(255, 92, 77, 0.2);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(255, 92, 77, 0);
+  }
+}
+
+@keyframes mcClickGreen {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(57, 255, 136, 0.85), inset 0 0 12px rgba(57, 255, 136, 0.45);
+  }
+  30% {
+    transform: scale(0.95) translateY(1px);
+    box-shadow: 0 0 0 3px rgba(57, 255, 136, 0.65);
+  }
+  75% {
+    transform: scale(1.015);
+    box-shadow: 0 0 0 6px rgba(57, 255, 136, 0.18);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(57, 255, 136, 0);
+  }
+}
+
+/* Step 2: Tactical Hazard Stripe Crawl & Radar Spinner for Loading State */
+@keyframes mcHazardScroll {
+  0% { background-position: 0 0; }
+  100% { background-position: 28px 0; }
+}
+
+@keyframes mcLoadingPulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(255, 182, 39, 0.3), inset 0 0 8px rgba(255, 182, 39, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(255, 182, 39, 0.65), inset 0 0 14px rgba(255, 182, 39, 0.3);
+  }
+}
+
+@keyframes mcRadarSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Step 3: Completion Approval Pop & Phosphor Bloom */
+@keyframes mcApprovalPop {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(57, 255, 136, 0.9), 0 0 22px rgba(57, 255, 136, 0.8);
+  }
+  60% {
+    transform: scale(1.025);
+    box-shadow: 0 0 0 6px rgba(57, 255, 136, 0.25), 0 0 16px rgba(57, 255, 136, 0.55);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 12px rgba(57, 255, 136, 0.4), inset 0 0 10px rgba(57, 255, 136, 0.15);
+  }
+}
+
 /* 7. PULSING RADAR EYEBROW */
 .eyebrow {
   font-size: 11px;
@@ -232,8 +348,10 @@ select,
               transform var(--duration-fast) var(--ease-out);
 }
 
-.rocker-switch:active {
-  transform: scale(0.94);
+.rocker-switch:active,
+.rocker-switch.mc-btn-clicked {
+  transform: scale(0.92);
+  animation: mcClickGreen 240ms var(--ease-spring);
 }
 
 .rocker-switch::after {
@@ -278,6 +396,19 @@ select,
   width: 100%;
   min-width: 0;
   overflow: hidden;
+  transition: border-color var(--duration-base) var(--ease-out),
+              box-shadow var(--duration-base) var(--ease-out);
+}
+
+.gauge-block.gauge-active {
+  border-color: var(--amber);
+  box-shadow: 0 0 10px rgba(255, 182, 39, 0.18);
+}
+
+.gauge-block.gauge-approved {
+  border-color: var(--green);
+  border-left: 3px solid var(--green);
+  background: rgba(57, 255, 136, 0.04);
 }
 
 .gauge-top {
@@ -363,7 +494,9 @@ select,
   border-left: 3px solid var(--line);
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  flex-shrink: 0 !important;
+  overflow-x: hidden;
+  overflow-y: visible;
   transition: border-color var(--duration-fast) var(--ease-out),
               background var(--duration-fast) var(--ease-out);
   animation: taskEnter var(--duration-base) var(--ease-out);
@@ -389,7 +522,192 @@ select,
   background: rgba(255, 182, 39, 0.06) !important;
 }
 
-/* High-specificity Tactical Buttons overriding Quasar .bg-primary */
+/* Scrollable Column & Disk Browser Row Guards (Never Collapse Flex Items) */
+.disk-dialog-card {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  max-height: 92vh !important;
+  overflow: hidden !important;
+}
+
+.disk-dialog-body {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.disk-dialog-body > *:not(.disk-list-scroll) {
+  flex-shrink: 0 !important;
+}
+
+.nicegui-column.overflow-y-auto,
+.disk-list-scroll {
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.nicegui-column.overflow-y-auto > *,
+.disk-list-scroll > * {
+  flex-shrink: 0 !important;
+}
+
+.disk-list-scroll {
+  flex: 1 1 auto !important;
+  min-height: 120px !important;
+  max-height: min(360px, calc(88vh - 230px)) !important;
+  width: 100% !important;
+  gap: 6px !important;
+  padding-right: 4px !important;
+}
+
+.disk-entry-row {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-shrink: 0 !important;
+  min-height: 44px !important;
+  width: 100% !important;
+  padding: 6px 12px !important;
+  gap: 10px !important;
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  border-left: 3px solid var(--amber) !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out) !important;
+}
+
+.disk-entry-row:hover {
+  background: var(--panel-2) !important;
+  border-color: var(--amber) !important;
+}
+
+.disk-entry-row.disk-entry-up {
+  border-left-color: var(--muted) !important;
+}
+
+.disk-entry-row.disk-entry-file {
+  border-left-color: var(--green) !important;
+}
+
+.disk-entry-row.disk-entry-file:hover {
+  border-color: var(--green) !important;
+}
+
+.disk-entry-main {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  cursor: pointer;
+}
+
+.disk-entry-name {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 12px !important;
+  font-weight: 600;
+  line-height: 1.35 !important;
+  color: var(--ink);
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: block !important;
+}
+
+.disk-entry-dir .disk-entry-name {
+  color: var(--amber) !important;
+  font-weight: 700 !important;
+}
+
+.disk-entry-up .disk-entry-name {
+  color: var(--muted) !important;
+  font-weight: 600 !important;
+}
+
+.disk-entry-file .disk-entry-name {
+  color: var(--ink) !important;
+  font-weight: 600 !important;
+}
+
+.disk-entry-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex-shrink: 0 !important;
+}
+
+.disk-entry-actions .q-btn,
+.disk-entry-actions button {
+  padding: 4px 10px !important;
+  min-height: 30px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.05em !important;
+}
+
+@media (max-width: 520px) {
+  .q-dialog__inner--minimized {
+    padding: 8px !important;
+  }
+
+  .disk-dialog-body {
+    padding: 10px !important;
+    gap: 8px !important;
+  }
+
+  .disk-entry-row {
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+
+  .disk-entry-actions {
+    gap: 4px !important;
+  }
+
+  .disk-entry-actions .q-btn,
+  .disk-entry-actions button {
+    padding: 4px 7px !important;
+    min-height: 28px !important;
+    font-size: 10px !important;
+  }
+}
+
+/* Completion Approval Banner (Step 3 Task Approval Readout) */
+.mc-approval-banner {
+  background: rgba(57, 255, 136, 0.08) !important;
+  border: 1px solid var(--green-dim) !important;
+  border-left: 3px solid var(--green) !important;
+  color: var(--green) !important;
+  padding: 8px 12px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  width: 100% !important;
+  animation: mcApprovalPop 280ms var(--ease-spring);
+}
+
+/* Primary Tactical Action Button (Tactical Amber #FFB627 — Never Blue) */
 .q-btn.btn-tactical-primary,
 .q-btn.btn-tactical-primary.bg-primary,
 button.btn-tactical-primary {
@@ -402,28 +720,41 @@ button.btn-tactical-primary {
   font-size: 11px !important;
   letter-spacing: 0.08em !important;
   padding: 8px 16px !important;
-  min-height: 36px !important;
+  min-height: 38px !important;
   cursor: pointer;
   text-transform: uppercase !important;
   white-space: nowrap !important;
   box-shadow: none !important;
+  position: relative;
+  overflow: hidden;
   transition: background var(--duration-fast) var(--ease-out),
               transform var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
               box-shadow var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-primary .q-btn__content,
+button.btn-tactical-primary .q-btn__content {
+  color: #1A1100 !important;
+  font-weight: 700 !important;
 }
 
 .q-btn.btn-tactical-primary:hover,
 button.btn-tactical-primary:hover {
   background: #ffc456 !important;
   background-color: #ffc456 !important;
-  box-shadow: 0 0 8px rgba(255, 182, 39, 0.4) !important;
+  box-shadow: 0 0 10px rgba(255, 182, 39, 0.45) !important;
 }
 
 .q-btn.btn-tactical-primary:active,
-button.btn-tactical-primary:active {
-  transform: scale(0.97) !important;
+button.btn-tactical-primary:active,
+.q-btn.btn-tactical-primary.mc-btn-clicked,
+button.btn-tactical-primary.mc-btn-clicked {
+  transform: scale(0.95) !important;
+  animation: mcClickCompress 260ms var(--ease-spring) !important;
 }
 
+/* Secondary Tactical Button (Panel Dark + Tactical Amber Hover/Click) */
 .q-btn.btn-tactical-secondary,
 .q-btn.btn-tactical-secondary.bg-primary,
 button.btn-tactical-secondary {
@@ -431,6 +762,7 @@ button.btn-tactical-secondary {
   background-color: var(--panel-2) !important;
   color: var(--ink) !important;
   border: 1px solid var(--line) !important;
+  border-left: 3px solid var(--amber-dim) !important;
   font-family: 'JetBrains Mono', monospace !important;
   font-weight: 600 !important;
   font-size: 11px !important;
@@ -441,22 +773,37 @@ button.btn-tactical-secondary {
   text-transform: uppercase !important;
   white-space: nowrap !important;
   box-shadow: none !important;
+  position: relative;
+  overflow: hidden;
   transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out),
               transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-secondary .q-btn__content,
+button.btn-tactical-secondary .q-btn__content {
+  color: inherit !important;
 }
 
 .q-btn.btn-tactical-secondary:hover,
 button.btn-tactical-secondary:hover {
   border-color: var(--amber) !important;
+  border-left-color: var(--amber) !important;
   color: var(--amber) !important;
+  box-shadow: 0 0 8px rgba(255, 182, 39, 0.25) !important;
 }
 
 .q-btn.btn-tactical-secondary:active,
-button.btn-tactical-secondary:active {
-  transform: scale(0.97) !important;
+button.btn-tactical-secondary:active,
+.q-btn.btn-tactical-secondary.mc-btn-clicked,
+button.btn-tactical-secondary.mc-btn-clicked {
+  transform: scale(0.95) !important;
+  animation: mcClickCompress 260ms var(--ease-spring) !important;
 }
 
+/* Destructive / Danger Tactical Button (Tactical Red #FF5C4D) */
 .q-btn.btn-tactical-danger,
 .q-btn.btn-tactical-danger.bg-primary,
 button.btn-tactical-danger {
@@ -464,6 +811,7 @@ button.btn-tactical-danger {
   background-color: rgba(255, 92, 77, 0.12) !important;
   color: var(--red) !important;
   border: 1px solid var(--red) !important;
+  border-left: 3px solid var(--red) !important;
   font-family: 'JetBrains Mono', monospace !important;
   font-weight: 700 !important;
   font-size: 11px !important;
@@ -474,8 +822,16 @@ button.btn-tactical-danger {
   text-transform: uppercase !important;
   white-space: nowrap !important;
   box-shadow: none !important;
+  position: relative;
+  overflow: hidden;
   transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
               transform var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-danger .q-btn__content,
+button.btn-tactical-danger .q-btn__content {
+  color: inherit !important;
 }
 
 .q-btn.btn-tactical-danger:hover,
@@ -483,11 +839,110 @@ button.btn-tactical-danger:hover {
   background: var(--red) !important;
   background-color: var(--red) !important;
   color: #0A0D10 !important;
+  box-shadow: 0 0 10px rgba(255, 92, 77, 0.4) !important;
 }
 
 .q-btn.btn-tactical-danger:active,
-button.btn-tactical-danger:active {
-  transform: scale(0.97) !important;
+button.btn-tactical-danger:active,
+.q-btn.btn-tactical-danger.mc-btn-clicked,
+button.btn-tactical-danger.mc-btn-clicked {
+  transform: scale(0.95) !important;
+  animation: mcClickDanger 260ms var(--ease-spring) !important;
+}
+
+/* STEP 2: Tactical Button Loading State (Crawling Hazard Stripes + Radar Spinner) */
+.q-btn.btn-tactical-loading,
+.q-btn.btn-tactical-primary.btn-tactical-loading,
+.q-btn.btn-tactical-secondary.btn-tactical-loading,
+button.btn-tactical-loading {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 182, 39, 0.24) 0px,
+    rgba(255, 182, 39, 0.24) 10px,
+    rgba(17, 22, 26, 0.96) 10px,
+    rgba(17, 22, 26, 0.96) 20px
+  ) !important;
+  background-size: 28px 28px !important;
+  color: var(--amber) !important;
+  border: 1px solid var(--amber) !important;
+  border-left: 4px solid var(--amber) !important;
+  cursor: wait !important;
+  opacity: 1 !important;
+  animation: mcHazardScroll 0.75s linear infinite, mcLoadingPulse 1.4s ease-in-out infinite !important;
+}
+
+.q-btn.btn-tactical-loading .q-btn__content,
+button.btn-tactical-loading .q-btn__content {
+  color: var(--amber) !important;
+  font-weight: 700 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.q-btn.btn-tactical-loading .q-btn__content::before,
+button.btn-tactical-loading::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--amber);
+  border-top-color: transparent;
+  flex-shrink: 0;
+  animation: mcRadarSpin 0.65s linear infinite;
+}
+
+/* STEP 3: Tactical Button Completion Approval State (Cyber Green #39FF88 + Phosphor Glow) */
+.q-btn.btn-tactical-approved,
+.q-btn.btn-tactical-primary.btn-tactical-approved,
+.q-btn.btn-tactical-secondary.btn-tactical-approved,
+button.btn-tactical-approved {
+  background: rgba(57, 255, 136, 0.18) !important;
+  background-color: rgba(57, 255, 136, 0.18) !important;
+  color: var(--green) !important;
+  border: 1px solid var(--green) !important;
+  border-left: 4px solid var(--green) !important;
+  box-shadow: 0 0 14px rgba(57, 255, 136, 0.4), inset 0 0 10px rgba(57, 255, 136, 0.15) !important;
+  opacity: 1 !important;
+  animation: mcApprovalPop 280ms var(--ease-spring) !important;
+}
+
+.q-btn.btn-tactical-approved .q-btn__content,
+button.btn-tactical-approved .q-btn__content {
+  color: var(--green) !important;
+  font-weight: 700 !important;
+}
+
+.q-btn.btn-tactical-approved:hover,
+button.btn-tactical-approved:hover {
+  background: var(--green) !important;
+  background-color: var(--green) !important;
+  color: #06150B !important;
+  box-shadow: 0 0 18px rgba(57, 255, 136, 0.6) !important;
+}
+
+.q-btn.btn-tactical-approved:hover .q-btn__content {
+  color: #06150B !important;
+}
+
+/* Fault / Error State on Task Button */
+.q-btn.btn-tactical-fault,
+.q-btn.btn-tactical-primary.btn-tactical-fault,
+.q-btn.btn-tactical-secondary.btn-tactical-fault,
+button.btn-tactical-fault {
+  background: rgba(255, 92, 77, 0.18) !important;
+  background-color: rgba(255, 92, 77, 0.18) !important;
+  color: var(--red) !important;
+  border: 1px solid var(--red) !important;
+  border-left: 4px solid var(--red) !important;
+  box-shadow: 0 0 12px rgba(255, 92, 77, 0.35) !important;
+  animation: mcClickDanger 260ms var(--ease-spring) !important;
+}
+
+.q-btn.btn-tactical-fault .q-btn__content,
+button.btn-tactical-fault .q-btn__content {
+  color: var(--red) !important;
+  font-weight: 700 !important;
 }
 
 /* Remove Quasar default button hover overlay sheen */
@@ -639,10 +1094,13 @@ button.btn-tactical-danger:active {
 .sector-nav-btn:hover {
   background: var(--panel-2);
   color: var(--ink);
+  border-left-color: var(--amber);
 }
 
-.sector-nav-btn:active {
-  transform: scale(0.98);
+.sector-nav-btn:active,
+.sector-nav-btn.mc-btn-clicked {
+  transform: scale(0.96);
+  animation: mcClickGreen 250ms var(--ease-spring);
 }
 
 .sector-nav-btn.active {
@@ -737,7 +1195,235 @@ button.btn-tactical-danger:active {
   box-shadow: 0 0 4px var(--green);
 }
 
-/* 11. ACCESSIBILITY: REDUCED MOTION */
+/* 11. CASCADE LAYER OVERRIDES: BEAT NICEGUI 4.0 @layer quasar_importants */
+@layer theme {
+  :root, body, body.body--dark {
+    --q-primary: #FFB627 !important;
+    --q-secondary: #151B20 !important;
+    --q-accent: #39FF88 !important;
+    --q-positive: #39FF88 !important;
+    --q-negative: #FF5C4D !important;
+    --q-info: #FFB627 !important;
+    --q-warning: #FFB627 !important;
+  }
+
+  [data-theme="light"], .theme-desert-ops, body.body--light {
+    --q-primary: #B8731D !important;
+    --q-secondary: #E3D5CA !important;
+    --q-accent: #2B824E !important;
+    --q-positive: #2B824E !important;
+    --q-negative: #C43D2F !important;
+    --q-info: #B8731D !important;
+    --q-warning: #B8731D !important;
+  }
+
+  *, *::before, *::after, .q-btn, .q-card, .q-field__control, .q-menu, .q-dialog__inner > div {
+    border-radius: 0 !important;
+  }
+
+  .q-btn.btn-tactical-primary,
+  .q-btn.btn-tactical-primary.bg-primary,
+  button.btn-tactical-primary {
+    background: var(--amber) !important;
+    background-color: var(--amber) !important;
+    color: #1A1100 !important;
+    border: 1px solid var(--amber) !important;
+  }
+
+  .q-btn.btn-tactical-primary .q-btn__content {
+    color: #1A1100 !important;
+  }
+
+  .q-btn.btn-tactical-secondary,
+  .q-btn.btn-tactical-secondary.bg-primary,
+  button.btn-tactical-secondary {
+    background: var(--panel-2) !important;
+    background-color: var(--panel-2) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line) !important;
+    border-left: 3px solid var(--amber-dim) !important;
+  }
+
+  .q-btn.btn-tactical-secondary .q-btn__content {
+    color: inherit !important;
+  }
+
+  .q-btn.btn-tactical-secondary:hover,
+  button.btn-tactical-secondary:hover {
+    border-color: var(--amber) !important;
+    border-left-color: var(--amber) !important;
+    color: var(--amber) !important;
+  }
+
+  .q-btn.btn-tactical-danger,
+  .q-btn.btn-tactical-danger.bg-primary,
+  button.btn-tactical-danger {
+    background: rgba(255, 92, 77, 0.12) !important;
+    background-color: rgba(255, 92, 77, 0.12) !important;
+    color: var(--red) !important;
+    border: 1px solid var(--red) !important;
+    border-left: 3px solid var(--red) !important;
+  }
+
+  .q-btn.btn-tactical-danger .q-btn__content {
+    color: inherit !important;
+  }
+
+  .q-btn.btn-tactical-danger:hover,
+  button.btn-tactical-danger:hover {
+    background: var(--red) !important;
+    background-color: var(--red) !important;
+    color: #0A0D10 !important;
+  }
+
+  .q-btn.btn-tactical-loading,
+  .q-btn.btn-tactical-primary.btn-tactical-loading,
+  .q-btn.btn-tactical-secondary.btn-tactical-loading,
+  button.btn-tactical-loading {
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(255, 182, 39, 0.24) 0px,
+      rgba(255, 182, 39, 0.24) 10px,
+      rgba(17, 22, 26, 0.96) 10px,
+      rgba(17, 22, 26, 0.96) 20px
+    ) !important;
+    background-size: 28px 28px !important;
+    color: var(--amber) !important;
+    border: 1px solid var(--amber) !important;
+    border-left: 4px solid var(--amber) !important;
+    opacity: 1 !important;
+  }
+
+  .q-btn.btn-tactical-loading .q-btn__content {
+    color: var(--amber) !important;
+  }
+
+  .q-btn.btn-tactical-approved,
+  .q-btn.btn-tactical-primary.btn-tactical-approved,
+  .q-btn.btn-tactical-secondary.btn-tactical-approved,
+  button.btn-tactical-approved {
+    background: rgba(57, 255, 136, 0.18) !important;
+    background-color: rgba(57, 255, 136, 0.18) !important;
+    color: var(--green) !important;
+    border: 1px solid var(--green) !important;
+    border-left: 4px solid var(--green) !important;
+    opacity: 1 !important;
+  }
+
+  .q-btn.btn-tactical-approved .q-btn__content {
+    color: var(--green) !important;
+  }
+
+  .q-btn.btn-tactical-approved:hover,
+  button.btn-tactical-approved:hover {
+    background: var(--green) !important;
+    background-color: var(--green) !important;
+    color: #06150B !important;
+  }
+
+  .q-btn.btn-tactical-approved:hover .q-btn__content {
+    color: #06150B !important;
+  }
+
+  .q-btn.btn-tactical-fault,
+  .q-btn.btn-tactical-primary.btn-tactical-fault,
+  .q-btn.btn-tactical-secondary.btn-tactical-fault,
+  button.btn-tactical-fault {
+    background: rgba(255, 92, 77, 0.18) !important;
+    background-color: rgba(255, 92, 77, 0.18) !important;
+    color: var(--red) !important;
+    border: 1px solid var(--red) !important;
+    border-left: 4px solid var(--red) !important;
+    opacity: 1 !important;
+  }
+
+  .q-btn.btn-tactical-fault .q-btn__content {
+    color: var(--red) !important;
+  }
+
+  .disk-dialog-card {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    max-height: 92vh !important;
+    overflow: hidden !important;
+  }
+
+  .disk-dialog-body {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .disk-dialog-body > *:not(.disk-list-scroll),
+  .tactical-row,
+  .nicegui-column.overflow-y-auto > *,
+  .disk-list-scroll > * {
+    flex-shrink: 0 !important;
+  }
+
+  .nicegui-column.overflow-y-auto,
+  .disk-list-scroll {
+    flex-wrap: nowrap !important;
+  }
+
+  .disk-list-scroll {
+    flex: 1 1 auto !important;
+    min-height: 120px !important;
+    max-height: min(360px, calc(88vh - 230px)) !important;
+  }
+
+  .disk-entry-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-shrink: 0 !important;
+    min-height: 44px !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .disk-entry-actions .q-btn,
+  .disk-entry-actions button {
+    padding: 4px 10px !important;
+    min-height: 30px !important;
+    font-size: 10px !important;
+  }
+
+  @media (max-width: 520px) {
+    .q-dialog__inner--minimized {
+      padding: 6px !important;
+    }
+
+    .disk-dialog-body {
+      padding: 8px !important;
+      gap: 6px !important;
+    }
+
+    .disk-entry-row {
+      padding: 5px 6px !important;
+      gap: 5px !important;
+    }
+
+    .disk-entry-actions {
+      gap: 4px !important;
+    }
+
+    .disk-entry-actions .q-btn,
+    .disk-entry-actions button {
+      padding: 3px 6px !important;
+      min-height: 26px !important;
+      font-size: 10px !important;
+    }
+  }
+}
+
+/* 12. ACCESSIBILITY: REDUCED MOTION */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

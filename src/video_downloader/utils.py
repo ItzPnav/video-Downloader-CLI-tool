@@ -15,6 +15,18 @@ def is_termux() -> bool:
     return "com.termux" in os.environ.get("PREFIX", "") or Path("/data/data/com.termux").exists()
 
 
+def is_non_termux_sdcard_path(path_val: str | Path) -> bool:
+    """Return True if path_val points to /sdcard or <drive>:\\sdcard on a non-Termux system."""
+    if is_termux() or not path_val:
+        return False
+    norm = str(path_val).replace("\\", "/").strip().lower()
+    if norm == "/sdcard" or norm.startswith("/sdcard/"):
+        return True
+    if len(norm) >= 9 and norm[1:3] == ":/" and (norm[3:] == "sdcard" or norm[3:].startswith("sdcard/")):
+        return True
+    return False
+
+
 DEFAULT_CONFIG = {
     "version": "0.2.0",
     "download_directory": "/sdcard/Download" if is_termux() else str(Path.home() / "Downloads"),
@@ -117,18 +129,17 @@ def get_download_dir() -> Path:
     target = config.get("download_directory", "")
 
     if target:
+        # On Windows/Linux non-Termux, convert /sdcard/Download or C:\sdcard\Download to user's Downloads directory
+        if is_non_termux_sdcard_path(target):
+            fallback = (Path.home() / "Downloads").resolve()
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback
+
         p = Path(target)
 
         # On Termux or if path exists
         if p.exists():
-            return p
-
-        # On Windows/Linux non-Termux, convert /sdcard/Download to user's Downloads directory
-        if str(target).startswith(("/sdcard", "\\sdcard")):
-            if sys.platform == "win32" or not is_termux():
-                fallback = Path.home() / "Downloads"
-                fallback.mkdir(parents=True, exist_ok=True)
-                return fallback
+            return p.resolve() if sys.platform == "win32" else p
 
         # Relative paths
         if not p.is_absolute():
@@ -142,7 +153,7 @@ def get_download_dir() -> Path:
 
         try:
             p.mkdir(parents=True, exist_ok=True)
-            return p
+            return p.resolve() if sys.platform == "win32" else p
         except Exception:
             pass
 
@@ -152,7 +163,7 @@ def get_download_dir() -> Path:
         sdcard.mkdir(parents=True, exist_ok=True)
         return sdcard
 
-    default_dir = Path.home() / "Downloads"
+    default_dir = (Path.home() / "Downloads").resolve()
     default_dir.mkdir(parents=True, exist_ok=True)
     return default_dir
 
@@ -203,12 +214,14 @@ def get_tool_output_dir(tool_name: str, config: dict = None) -> Path:
     custom_dir = config.get(key)
 
     if custom_dir:
+        if is_non_termux_sdcard_path(custom_dir):
+            return get_tool_default_dir(tool_name)
         p = Path(custom_dir)
         try:
             if not p.is_absolute():
                 p = (ROOT / p).resolve()
             p.mkdir(parents=True, exist_ok=True)
-            return p
+            return p.resolve() if sys.platform == "win32" else p
         except Exception:
             pass
 
@@ -262,7 +275,7 @@ def reset_all_tool_dirs_to_defaults() -> dict:
     """
     Reset all tool output directories back to distinct default subfolders under system Downloads.
     """
-    default_base = Path("/sdcard/Download") if Path("/sdcard").exists() else (Path.home() / "Downloads")
+    default_base = Path("/sdcard/Download") if (is_termux() and Path("/sdcard").exists()) else (Path.home() / "Downloads").resolve()
     return auto_separate_all_tool_dirs(default_base, create_video_subfolder=False)
 
 

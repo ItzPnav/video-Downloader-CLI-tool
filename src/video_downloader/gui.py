@@ -37,10 +37,11 @@ from .utils import (
     get_download_dir,
     get_tool_output_dir,
     get_version,
+    is_non_termux_sdcard_path,
     is_termux,
     load_config,
     reset_all_tool_dirs_to_defaults,
-     safe_filename,
+    safe_filename,
     save_config,
     set_tool_output_dir,
     write_history,
@@ -111,6 +112,114 @@ def acquire_termux_wake_lock() -> bool:
 
 
 # ============================================================================
+# TACTICAL BUTTON CONTROLLER (3-STEP FEEDBACK: CLICK -> LOADING -> APPROVAL)
+# ============================================================================
+
+class TacticalButtonController:
+    """
+    Manages the 3-step Mission Control button lifecycle for upload/download/task buttons:
+      Step 1: Instant mechanical click compression + shockwave animation (.mc-btn-clicked)
+      Step 2: Active crawling hazard-stripe & radar-spinner loading state (.btn-tactical-loading)
+      Step 3: Cyber Green completion approval state (.btn-tactical-approved) + approval banner
+    """
+
+    def __init__(
+        self,
+        btn: Any,
+        idle_label: str,
+        approval_banner_container: Optional[Any] = None,
+    ) -> None:
+        self.btn = btn
+        self.idle_label = idle_label
+        self.state = "idle"
+        self.approval_banner_container = approval_banner_container
+        self.btn.props('data-mc-task="true" data-mc-state="idle"')
+
+    def pulse_click(self) -> None:
+        """Step 1: Trigger tactile click compression and shockwave animation."""
+        self.btn.classes(remove="mc-btn-clicked")
+        self.btn.classes(add="mc-btn-clicked")
+
+    def start_loading(
+        self,
+        loading_label: str = "WORKING...",
+        disable_button: bool = True,
+    ) -> None:
+        """Step 2: Transition button into active loading state with spinner and hazard stripes."""
+        self.state = "loading"
+        self.pulse_click()
+        self.btn.classes(
+            remove="btn-tactical-approved btn-tactical-fault",
+            add="btn-tactical-loading",
+        )
+        self.btn.props('data-mc-state="loading"')
+        self.btn.set_text(loading_label)
+        if disable_button:
+            self.btn.disable()
+        if self.approval_banner_container is not None:
+            self.approval_banner_container.clear()
+            self.approval_banner_container.set_visibility(False)
+
+    def update_loading(self, pct: int, phase_text: str) -> None:
+        """Update live percentage / telemetry phase on the button while loading."""
+        if self.state != "loading":
+            self.start_loading(f"{phase_text} · {pct}%")
+            return
+        clamped = max(0, min(100, int(pct)))
+        self.btn.set_text(f"{phase_text} · {clamped}%")
+
+    def approve(
+        self,
+        approved_label: str = "[✓] APPROVED // COMPLETE",
+        banner_detail: Optional[str] = None,
+    ) -> None:
+        """Step 3: Transition button into Cyber Green completion approval state."""
+        from nicegui import ui
+
+        self.state = "approved"
+        if not approved_label.startswith("[✓]"):
+            approved_label = f"[✓] {approved_label}"
+        self.btn.classes(
+            remove="btn-tactical-loading btn-tactical-fault",
+            add="btn-tactical-approved",
+        )
+        self.btn.props('data-mc-state="approved"')
+        self.btn.set_text(approved_label)
+        self.btn.enable()
+
+        if self.approval_banner_container is not None and banner_detail:
+            self.approval_banner_container.clear()
+            self.approval_banner_container.set_visibility(True)
+            with self.approval_banner_container:
+                with ui.element("div").classes("mc-approval-banner"):
+                    ui.label(banner_detail).style(
+                        "color: var(--green); font-size: 11px; font-weight: 700; word-break: break-all;"
+                    )
+                    ui.label("APPROVED // VERIFIED").classes("mc-badge-green")
+
+    def fail(self, fault_label: str = "[!] FAILED — TRY AGAIN") -> None:
+        """Transition button to fault state and re-enable for retry."""
+        self.state = "fault"
+        self.btn.classes(
+            remove="btn-tactical-loading btn-tactical-approved",
+            add="btn-tactical-fault",
+        )
+        self.btn.props('data-mc-state="fault"')
+        self.btn.set_text(fault_label)
+        self.btn.enable()
+
+    def reset(self) -> None:
+        """Restore button to idle state and label."""
+        self.state = "idle"
+        self.btn.classes(
+            remove="btn-tactical-loading btn-tactical-approved btn-tactical-fault mc-btn-clicked"
+        )
+        self.btn.props('data-mc-state="idle"')
+        self.btn.set_text(self.idle_label)
+        self.btn.enable()
+
+
+# ============================================================================
 # MISSION CONTROL UI BUILDER (NICEGUI)
 # ============================================================================
 
@@ -121,7 +230,7 @@ def build_mission_control_dashboard() -> None:
     from .cli import system_open, valid_url
     from .comic_scraper import scrape_and_download_comic
     from .converter import (
-         AUDIO_EXTENSIONS,
+        AUDIO_EXTENSIONS,
         IMAGE_EXTENSIONS,
         TEXT_EXTENSIONS,
         VIDEO_EXTENSIONS,
@@ -143,7 +252,20 @@ def build_mission_control_dashboard() -> None:
     from .race_controller import ExtractionRaceController
     from .router import identify
 
-    # 1. Inject Mission Control CSS, CRT scanline layer, and ZULU Clock script
+    # 1. Enforce Mission Control palette on Quasar (eliminating default blue)
+    ui.colors(
+        primary="#FFB627",
+        secondary="#151B20",
+        accent="#39FF88",
+        dark="#11161A",
+        dark_page="#0A0D10",
+        positive="#39FF88",
+        negative="#FF5C4D",
+        info="#FFB627",
+        warning="#FFB627",
+    )
+
+    # 2. Inject Mission Control CSS, CRT scanline layer, ZULU Clock, and Step-1 Click Animator
     css_text = load_mission_control_css()
     ui.add_head_html(f"<style>{css_text}</style>")
     ui.add_body_html('<div class="scanline" aria-hidden="true"></div>')
@@ -160,6 +282,7 @@ def build_mission_control_dashboard() -> None:
         }
         setInterval(updateMissionZuluClock, 1000);
         document.addEventListener('DOMContentLoaded', updateMissionZuluClock);
+
         function toggleMissionTheme(isLight) {
             if (isLight) {
                 document.documentElement.setAttribute('data-theme', 'light');
@@ -167,6 +290,26 @@ def build_mission_control_dashboard() -> None:
                 document.documentElement.removeAttribute('data-theme');
             }
         }
+
+        /* Step 1: Instant client-side click compression & shockwave on ALL buttons */
+        function triggerMcClickAnimation(target) {
+            if (!target || !target.closest) return;
+            const btn = target.closest('button, .q-btn, .sector-nav-btn, .rocker-switch');
+            if (!btn || btn.disabled) return;
+            btn.classList.remove('mc-btn-clicked');
+            void btn.offsetWidth;
+            btn.classList.add('mc-btn-clicked');
+            if (btn._mcClickTimer) clearTimeout(btn._mcClickTimer);
+            btn._mcClickTimer = setTimeout(function() {
+                btn.classList.remove('mc-btn-clicked');
+            }, 280);
+        }
+        document.addEventListener('pointerdown', function(e) {
+            triggerMcClickAnimation(e.target);
+        }, true);
+        document.addEventListener('click', function(e) {
+            triggerMcClickAnimation(e.target);
+        }, true);
         </script>
         """
     )
@@ -189,8 +332,63 @@ def build_mission_control_dashboard() -> None:
     ui.timer(0.1, drain_ui_queue)
 
     # ------------------------------------------------------------------------
-    # REUSABLE MISSION CONTROL COMPONENTS
+    # REUSABLE MISSION CONTROL COMPONENTS & BUTTON FACTORIES
     # ------------------------------------------------------------------------
+
+    def create_mc_button(
+        label: str,
+        on_click: Optional[Callable[..., Any]] = None,
+        variant: str = "primary",
+        extra_classes: str = "",
+    ):
+        """
+        Create a zero-radius Mission Control button with color=None (never Quasar blue)
+        and automatic Step-1 click animation feedback.
+        """
+        variant_cls = {
+            "primary": "btn-tactical-primary",
+            "secondary": "btn-tactical-secondary",
+            "danger": "btn-tactical-danger",
+        }.get(variant, "btn-tactical-primary")
+
+        btn = ui.button(label, color=None).props("flat unelevated no-caps")
+        btn.classes(f"{variant_cls} {extra_classes}".strip())
+
+        def _wrapped_click(e: Any = None) -> None:
+            btn.classes(remove="mc-btn-clicked")
+            btn.classes(add="mc-btn-clicked")
+            if on_click is not None:
+                import inspect
+                try:
+                    sig = inspect.signature(on_click)
+                    if len(sig.parameters) == 0:
+                        on_click()
+                    else:
+                        on_click(e)
+                except TypeError:
+                    on_click()
+
+        btn.on("click", _wrapped_click)
+        return btn
+
+    def create_task_button(
+        label: str,
+        on_click: Optional[Callable[[], Any]] = None,
+        variant: str = "primary",
+        extra_classes: str = "",
+        approval_banner_container: Optional[Any] = None,
+    ) -> tuple[Any, TacticalButtonController]:
+        """
+        Create a Mission Control button equipped with the full 3-step lifecycle controller
+        (Step 1: Click animation -> Step 2: Loading state -> Step 3: Completion approval).
+        """
+        btn = create_mc_button(label, on_click=on_click, variant=variant, extra_classes=extra_classes)
+        ctrl = TacticalButtonController(
+            btn=btn,
+            idle_label=label,
+            approval_banner_container=approval_banner_container,
+        )
+        return btn, ctrl
 
     def create_rocker_switch(
         label_text: str,
@@ -209,6 +407,8 @@ def build_mission_control_dashboard() -> None:
 
             def _handle_click() -> None:
                 state["checked"] = not state["checked"]
+                btn.classes(remove="mc-btn-clicked")
+                btn.classes(add="mc-btn-clicked")
                 if state["checked"]:
                     btn.classes(add="active")
                 else:
@@ -235,7 +435,7 @@ def build_mission_control_dashboard() -> None:
         return state
 
     def create_fuel_gauge(label_prefix: str = "Progress", initial_status: str = "Ready"):
-        """Render a crawling striped Mission Control progress bar with simple status text."""
+        """Render a crawling striped Mission Control progress bar with status and approval styling."""
         with ui.element("div").classes("gauge-block") as block:
             with ui.element("div").classes("gauge-top"):
                 status_lbl = ui.label(initial_status).classes("gauge-status-text").style(
@@ -251,7 +451,19 @@ def build_mission_control_dashboard() -> None:
             clamped = max(0, min(100, int(pct)))
             status_lbl.set_text(text)
             pct_lbl.set_text(f"{clamped}%")
-            fill_el.style(f"width: {clamped}%;")
+            if clamped >= 100:
+                block.classes(remove="gauge-active", add="gauge-approved")
+                status_lbl.style("font-size: 11px; letter-spacing: 0.04em; color: var(--green); font-weight: 700;")
+                fill_el.style("width: 100%;")
+            elif clamped > 0:
+                block.classes(remove="gauge-approved", add="gauge-active")
+                status_lbl.style("font-size: 11px; letter-spacing: 0.04em; color: var(--amber); font-weight: 600;")
+                visual_w = max(8, clamped)
+                fill_el.style(f"width: {visual_w}%;")
+            else:
+                block.classes(remove="gauge-active gauge-approved")
+                status_lbl.style("font-size: 11px; letter-spacing: 0.04em; color: var(--muted);")
+                fill_el.style("width: 0%;")
 
         return block, set_gauge
 
@@ -261,12 +473,12 @@ def build_mission_control_dashboard() -> None:
             "background: var(--panel-2); border-bottom: 1px solid var(--line);"
         ):
             dialog_eyebrow = ui.label("NOTICE").classes("eyebrow")
-            ui.button("Close", on_click=sys_dialog.close).classes("btn-tactical-secondary py-1 px-2")
+            create_mc_button("Close", on_click=sys_dialog.close, variant="secondary", extra_classes="py-1 px-2")
         with ui.column().classes("p-4 gap-3 w-full"):
             dialog_title = ui.label("STATUS").classes("display-title text-xl")
             dialog_msg = ui.label("").style("font-size: 12px; color: var(--ink); line-height: 1.5; word-break: break-all;")
             with ui.row().classes("w-full justify-end gap-2 pt-2"):
-                ui.button("OK", on_click=sys_dialog.close).classes("btn-tactical-primary")
+                create_mc_button("OK", on_click=sys_dialog.close, variant="primary")
 
     def show_system_modal(title: str, message: str, is_fault: bool = False) -> None:
         dialog_eyebrow.set_text("ERROR" if is_fault else "NOTICE")
@@ -275,71 +487,114 @@ def build_mission_control_dashboard() -> None:
         dialog_msg.set_text(message)
         sys_dialog.open()
 
-    # Custom Server-Side Local Disk Browser Modal
+    # Custom Server-Side Local Disk Browser Modal with 3-step Upload/Selection Button Feedback
     browser_state: dict[str, Any] = {
         "current_dir": get_download_dir(),
         "mode": "file",
         "allowed_exts": None,
         "on_select": None,
         "title": "Select File or Folder",
+        "caller_ctrl": None,
+        "approved_label": "[✓] LOADED",
+        "selection_made": False,
     }
 
-    with ui.dialog() as disk_dialog, ui.card().classes("mc-panel p-0 w-[680px] max-w-[96vw]"):
-        with ui.row().classes("w-full items-center justify-between px-4 py-2").style(
+    def _close_disk_browser_cancelled() -> None:
+        disk_dialog.close()
+        ctrl: Optional[TacticalButtonController] = browser_state.get("caller_ctrl")
+        if ctrl is not None and not browser_state.get("selection_made"):
+            ctrl.reset()
+
+    with ui.dialog() as disk_dialog, ui.card().classes("mc-panel disk-dialog-card p-0 w-[680px] max-w-[96vw]"):
+        with ui.row().classes("w-full items-center justify-between px-4 py-2 shrink-0").style(
             "background: var(--panel-2); border-bottom: 1px solid var(--line);"
         ):
             disk_header_lbl = ui.label("SELECT PATH").classes("eyebrow")
-            ui.button("Close", on_click=disk_dialog.close).classes("btn-tactical-secondary")
+            create_mc_button("Close", on_click=_close_disk_browser_cancelled, variant="secondary")
 
-        with ui.column().classes("p-4 gap-3 w-full"):
-            with ui.row().classes("w-full items-center gap-2"):
+        with ui.column().classes("disk-dialog-body p-4 gap-2.5 w-full"):
+            with ui.row().classes("w-full items-center gap-2 shrink-0"):
                 disk_path_input = ui.input("Folder Path").classes("mc-input flex-grow").props("dense outlined")
-                ui.button("Go", on_click=lambda: _navigate_disk_to(Path(disk_path_input.value))).classes("btn-tactical-secondary")
-                ui.button("Up", on_click=lambda: _navigate_disk_to(browser_state["current_dir"].parent)).classes("btn-tactical-secondary")
+                disk_path_input.on("keydown.enter", lambda: _navigate_disk_to(disk_path_input.value))
+                create_mc_button("Go", on_click=lambda: _navigate_disk_to(disk_path_input.value), variant="secondary")
+                create_mc_button("Up", on_click=lambda: _navigate_disk_to(browser_state["current_dir"].parent), variant="secondary")
 
-            with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                ui.button("Downloads", on_click=lambda: _navigate_disk_to(get_download_dir())).classes("btn-tactical-secondary")
-                ui.button("Home", on_click=lambda: _navigate_disk_to(Path.home())).classes("btn-tactical-secondary")
-                ui.button("Project", on_click=lambda: _navigate_disk_to(ROOT)).classes("btn-tactical-secondary")
-                if Path("/sdcard/Download").exists():
-                    ui.button("SDCard", on_click=lambda: _navigate_disk_to(Path("/sdcard/Download"))).classes("btn-tactical-secondary")
+            with ui.row().classes("w-full items-center gap-2 flex-wrap shrink-0"):
+                create_mc_button("Downloads", on_click=lambda: _navigate_disk_to(get_download_dir()), variant="secondary")
+                if (Path.home() / "Desktop").is_dir():
+                    create_mc_button("Desktop", on_click=lambda: _navigate_disk_to(Path.home() / "Desktop"), variant="secondary")
+                create_mc_button("Home", on_click=lambda: _navigate_disk_to(Path.home()), variant="secondary")
+                create_mc_button("Project", on_click=lambda: _navigate_disk_to(ROOT), variant="secondary")
+                if is_termux() and Path("/sdcard/Download").exists():
+                    create_mc_button("SDCard", on_click=lambda: _navigate_disk_to(Path("/sdcard/Download")), variant="secondary")
 
-            disk_select_folder_row = ui.row().classes("w-full")
-            disk_list_container = ui.column().classes("w-full gap-1 max-h-[340px] overflow-y-auto pr-1")
+            disk_select_folder_row = ui.row().classes("w-full shrink-0")
+            disk_summary_lbl = ui.label("").classes("shrink-0").style("font-size: 11px; color: var(--muted); letter-spacing: 0.04em;")
+            disk_list_container = ui.column().classes("disk-list-scroll w-full gap-1.5 overflow-y-auto pr-1 no-wrap")
+
+    disk_dialog.on(
+        "hide",
+        lambda: (
+            browser_state["caller_ctrl"].reset()
+            if browser_state.get("caller_ctrl") is not None and not browser_state.get("selection_made")
+            else None
+        ),
+    )
+
+    def _complete_disk_selection(target_path: Path) -> None:
+        browser_state["selection_made"] = True
+        ctrl: Optional[TacticalButtonController] = browser_state.get("caller_ctrl")
+        approved_lbl: str = browser_state.get("approved_label") or "[✓] LOADED"
+        disk_dialog.close()
+        if browser_state["on_select"]:
+            browser_state["on_select"](target_path)
+        if ctrl is not None:
+            ctrl.approve(approved_lbl)
 
     def _render_disk_entries() -> None:
-        curr: Path = browser_state["current_dir"]
+        curr: Path = browser_state["current_dir"].resolve()
+        browser_state["current_dir"] = curr
         disk_path_input.value = str(curr)
         disk_select_folder_row.clear()
         disk_list_container.clear()
 
         mode = browser_state["mode"]
         exts = browser_state["allowed_exts"]
+        disk_select_folder_row.set_visibility(mode in ("folder", "any"))
 
         if mode in ("folder", "any"):
             with disk_select_folder_row:
                 def _pick_current_folder(target_dir=curr) -> None:
-                    disk_dialog.close()
-                    if browser_state["on_select"]:
-                        browser_state["on_select"](target_dir)
+                    _complete_disk_selection(target_dir)
 
-                ui.button(
-                    f"Use This Folder: {curr.name or str(curr)}",
+                folder_display = curr.name if curr.name else str(curr)
+                create_mc_button(
+                    f"Use This Folder: {folder_display}",
                     on_click=_pick_current_folder,
-                ).classes("btn-tactical-primary w-full")
+                    variant="primary",
+                    extra_classes="w-full",
+                )
 
         dirs: list[Path] = []
         files: list[Path] = []
+        hidden_win_names = {"system volume information", "config.msi", "recovery"}
         try:
             for entry in curr.iterdir():
-                if entry.name.startswith("."):
+                if entry.name.startswith((".", "$")) or entry.name.lower() in hidden_win_names:
                     continue
-                if entry.is_dir():
-                    dirs.append(entry)
-                elif entry.is_file() and mode in ("file", "any"):
-                    if exts is None or entry.suffix.lower() in exts:
-                        files.append(entry)
+                if is_non_termux_sdcard_path(entry):
+                    continue
+                try:
+                    if entry.is_dir():
+                        dirs.append(entry)
+                    elif entry.is_file():
+                        if exts is None or entry.suffix.lower() in exts:
+                            files.append(entry)
+                except OSError:
+                    continue
         except Exception as err:
+            disk_summary_lbl.set_text(f"Access denied: {curr}")
+            disk_summary_lbl.style("font-size: 11px; color: var(--red); letter-spacing: 0.04em;")
             with disk_list_container:
                 ui.label(f"[-] Access denied: {err}").style("color: var(--red); font-size: 11px;")
             return
@@ -347,15 +602,57 @@ def build_mission_control_dashboard() -> None:
         dirs.sort(key=lambda p: p.name.lower())
         files.sort(key=lambda p: p.name.lower())
 
+        disk_summary_lbl.style("font-size: 11px; color: var(--muted); letter-spacing: 0.04em;")
+        if mode == "folder":
+            disk_summary_lbl.set_text(f"{len(dirs)} subfolder(s) · {len(files)} file(s) in {curr}")
+        else:
+            disk_summary_lbl.set_text(f"{len(dirs)} folder(s) · {len(files)} file(s) in {curr}")
+
         with disk_list_container:
+            if curr.parent != curr:
+                with ui.element("div").classes("tactical-row disk-entry-row disk-entry-up"):
+                    with ui.element("div").classes("disk-entry-main") as up_main:
+                        up_main.on("click", lambda _e=None, target=curr.parent: _navigate_disk_to(target))
+                        ui.label("UP").classes("mc-badge-muted")
+                        ui.label(".. (Parent Folder)").classes("disk-entry-name").style(
+                            "color: var(--muted); font-size: 12px; font-weight: 600;"
+                        )
+                    with ui.element("div").classes("disk-entry-actions"):
+                        create_mc_button(
+                            "Up",
+                            on_click=lambda _e=None, target=curr.parent: _navigate_disk_to(target),
+                            variant="secondary",
+                            extra_classes="py-1 px-2.5",
+                        )
+
             if not dirs and not files:
-                ui.label("Empty folder").style("color: var(--muted); font-size: 11px; padding: 12px;")
+                ui.label("No matching folders or files in this directory.").style(
+                    "color: var(--muted); font-size: 12px; padding: 12px;"
+                )
                 return
 
             for d in dirs[:150]:
-                with ui.row().classes("tactical-row w-full items-center justify-between px-3 py-2 cursor-pointer"):
-                    ui.label(f"📁 {d.name}/").style("color: var(--amber); font-size: 12px; font-weight: 600;")
-                    ui.button("Open", on_click=lambda _e, target=d: _navigate_disk_to(target)).classes("btn-tactical-secondary py-1 px-2")
+                with ui.element("div").classes("tactical-row disk-entry-row disk-entry-dir"):
+                    with ui.element("div").classes("disk-entry-main") as dir_main:
+                        dir_main.on("click", lambda _e=None, target=d: _navigate_disk_to(target))
+                        ui.label("DIR").classes("mc-badge-amber")
+                        ui.label(f"{d.name}/").classes("disk-entry-name").style(
+                            "color: var(--amber); font-size: 12px; font-weight: 700;"
+                        )
+                    with ui.element("div").classes("disk-entry-actions"):
+                        create_mc_button(
+                            "Open",
+                            on_click=lambda _e=None, target=d: _navigate_disk_to(target),
+                            variant="secondary",
+                            extra_classes="py-1 px-2.5",
+                        )
+                        if mode in ("folder", "any"):
+                            create_mc_button(
+                                "Select",
+                                on_click=lambda _e=None, target=d: _complete_disk_selection(target),
+                                variant="primary",
+                                extra_classes="py-1 px-2.5",
+                            )
 
             for f in files[:200]:
                 try:
@@ -363,28 +660,47 @@ def build_mission_control_dashboard() -> None:
                     sz_str = f"{sz_mb:.1f} MB"
                 except Exception:
                     sz_str = ""
-                with ui.row().classes("tactical-row selected w-full items-center justify-between px-3 py-2"):
-                    ui.label(f.name).style("color: var(--ink); font-size: 12px; word-break: break-all;")
-                    with ui.row().classes("items-center gap-2 no-wrap"):
+                pick_target = curr if mode == "folder" else f
+                pick_btn_label = "Use Folder" if mode == "folder" else "Select"
+                with ui.element("div").classes("tactical-row selected disk-entry-row disk-entry-file"):
+                    with ui.element("div").classes("disk-entry-main") as file_main:
+                        file_main.on("click", lambda _e=None, target=pick_target: _complete_disk_selection(target))
+                        ui.label("FILE").classes("mc-badge-green")
+                        ui.label(f.name).classes("disk-entry-name").style(
+                            "color: var(--ink); font-size: 12px; font-weight: 600;"
+                        )
+                    with ui.element("div").classes("disk-entry-actions"):
                         if sz_str:
                             ui.label(sz_str).classes("mc-badge-muted")
-                        def _pick_file(_e=None, target=f) -> None:
-                            disk_dialog.close()
-                            if browser_state["on_select"]:
-                                browser_state["on_select"](target)
-                        ui.button("Select", on_click=_pick_file).classes("btn-tactical-primary py-1 px-3")
 
-    def _navigate_disk_to(new_dir: Path) -> None:
+                        def _pick_file(_e=None, target=pick_target) -> None:
+                            _complete_disk_selection(target)
+
+                        create_mc_button(pick_btn_label, on_click=_pick_file, variant="primary", extra_classes="py-1 px-3")
+
+    def _navigate_disk_to(new_dir: str | Path | None) -> None:
+        if new_dir is None:
+            return
+        raw_str = str(new_dir).strip()
+        if not raw_str:
+            return
         try:
-            resolved = new_dir.resolve()
+            expanded = Path(os.path.expandvars(os.path.expanduser(raw_str)))
+            if is_non_termux_sdcard_path(expanded):
+                expanded = get_download_dir()
+            resolved = expanded.resolve()
             if resolved.is_dir():
                 browser_state["current_dir"] = resolved
                 _render_disk_entries()
             elif resolved.is_file():
                 browser_state["current_dir"] = resolved.parent
                 _render_disk_entries()
-        except Exception:
-            pass
+            else:
+                disk_summary_lbl.set_text(f"[!] Path not found: {raw_str}")
+                disk_summary_lbl.style("font-size: 11px; color: var(--red); letter-spacing: 0.04em;")
+        except Exception as err:
+            disk_summary_lbl.set_text(f"[!] Invalid path ({raw_str}): {err}")
+            disk_summary_lbl.style("font-size: 11px; color: var(--red); letter-spacing: 0.04em;")
 
     def open_disk_browser(
         mode: str,
@@ -392,12 +708,24 @@ def build_mission_control_dashboard() -> None:
         title: str = "Select Path",
         allowed_exts: Optional[set[str]] = None,
         initial_dir: Optional[Path] = None,
+        caller_ctrl: Optional[TacticalButtonController] = None,
+        loading_label: str = "SELECTING...",
+        approved_label: str = "[✓] LOADED",
     ) -> None:
         browser_state["mode"] = mode
         browser_state["on_select"] = on_select
         browser_state["allowed_exts"] = allowed_exts
         browser_state["title"] = title
+        browser_state["caller_ctrl"] = caller_ctrl
+        browser_state["approved_label"] = approved_label
+        browser_state["selection_made"] = False
+
+        if caller_ctrl is not None:
+            caller_ctrl.start_loading(loading_label, disable_button=False)
+
         start_dir = initial_dir or browser_state.get("current_dir") or get_download_dir()
+        if is_non_termux_sdcard_path(start_dir):
+            start_dir = get_download_dir()
         if start_dir.is_file():
             start_dir = start_dir.parent
         if not start_dir.exists():
@@ -406,6 +734,16 @@ def build_mission_control_dashboard() -> None:
         disk_header_lbl.set_text(title.upper())
         _render_disk_entries()
         disk_dialog.open()
+
+    def trigger_browser_download_with_feedback(file_path: Path, btn_ctrl: TacticalButtonController) -> None:
+        """Execute browser file download with full 3-step Click -> Loading -> Approval feedback."""
+        btn_ctrl.start_loading("TRANSFERRING...", disable_button=True)
+        ui.download(file_path)
+        ui.timer(
+            0.45,
+            lambda: btn_ctrl.approve("[✓] APPROVED // SAVED"),
+            once=True,
+        )
 
     # ------------------------------------------------------------------------
     # TOP BAR (Simple & Clean)
@@ -449,7 +787,7 @@ def build_mission_control_dashboard() -> None:
                 )
 
     # ------------------------------------------------------------------------
-    # SIMPLE 6-TAB NAVIGATION BAR
+    # SIMPLE 6-TAB NAVIGATION BAR (Step 1 Click Animation)
     # ------------------------------------------------------------------------
     sectors = [
         ("01", "1. Video Downloader"),
@@ -466,7 +804,8 @@ def build_mission_control_dashboard() -> None:
     def switch_sector(code: str) -> None:
         for k, btn in nav_buttons.items():
             if k == code:
-                btn.classes(add="active")
+                btn.classes(remove="mc-btn-clicked")
+                btn.classes(add="active mc-btn-clicked")
             else:
                 btn.classes(remove="active")
         for k, container in sector_containers.items():
@@ -532,8 +871,11 @@ def build_mission_control_dashboard() -> None:
 
                     _, update_race_gauge = create_fuel_gauge("Download", "Ready")
 
+                    race_approval_box = ui.column().classes("w-full")
+                    race_approval_box.set_visibility(False)
+
                     with ui.row().classes("w-full items-center justify-between gap-3 pt-1 flex-wrap"):
-                        ui.button(
+                        create_mc_button(
                             "Change Output Folder",
                             on_click=lambda: open_disk_browser(
                                 mode="folder",
@@ -543,8 +885,14 @@ def build_mission_control_dashboard() -> None:
                                     show_system_modal("Folder Updated", f"Videos will be saved to:\n{p}"),
                                 ),
                             ),
-                        ).classes("btn-tactical-secondary")
-                        race_start_btn = ui.button("Download Video").classes("btn-tactical-primary px-6")
+                            variant="secondary",
+                        )
+                        race_start_btn, race_btn_ctrl = create_task_button(
+                            "Download Video",
+                            variant="primary",
+                            extra_classes="px-6",
+                            approval_banner_container=race_approval_box,
+                        )
 
                     race_result_summary = ui.label("").style("font-size: 12px; color: var(--muted);")
                     race_action_row = ui.row().classes("gap-2 items-center")
@@ -609,6 +957,7 @@ def build_mission_control_dashboard() -> None:
             def _start_extraction_race() -> None:
                 raw_url = (race_url_input.value or "").strip()
                 if not valid_url(raw_url):
+                    race_btn_ctrl.fail("[!] INVALID URL — RETRY")
                     show_system_modal(
                         "Invalid URL",
                         "Please enter a valid URL starting with http:// or https://",
@@ -623,10 +972,10 @@ def build_mission_control_dashboard() -> None:
                 for t_key in agent_cards:
                     _set_agent_card_state(t_key, "Idle")
 
+                race_btn_ctrl.start_loading(f"SCANNING {route.platform.upper()}...")
                 update_race_gauge(8, f"Scanning {route.platform}...")
                 race_result_summary.set_text("")
                 race_action_row.clear()
-                race_start_btn.disable()
 
                 q_val = race_quality_sel.value
                 req_quality = None if not q_val or q_val.startswith("Best") else q_val
@@ -645,6 +994,7 @@ def build_mission_control_dashboard() -> None:
                         pct = min(65, 10 + int((elapsed / max(1000, timeout_s * 1000)) * 55))
                         def _apply_tick() -> None:
                             update_race_gauge(pct, f"Searching stream ({elapsed / 1000:.1f}s)...")
+                            race_btn_ctrl.update_loading(pct, "SCANNING STREAM")
                             for tk, st in statuses.items():
                                 _set_agent_card_state(tk, st)
                         dispatch_ui(_apply_tick)
@@ -684,6 +1034,7 @@ def build_mission_control_dashboard() -> None:
                             def _mark_winner() -> None:
                                 _set_agent_card_state(win_tier, "Winner")
                                 update_race_gauge(70, f"Downloading via {win_tier}...")
+                                race_btn_ctrl.update_loading(70, f"DOWNLOADING ({win_tier.upper()})")
 
                             dispatch_ui(_mark_winner)
 
@@ -693,7 +1044,10 @@ def build_mission_control_dashboard() -> None:
                                 requested_quality=req_quality,
                                 conflict_policy=conflict_pol,
                                 progress_callback=lambda p, m: dispatch_ui(
-                                    lambda p=p, m=m: update_race_gauge(70 + int(p * 0.3), m)
+                                    lambda p=p, m=m: (
+                                        update_race_gauge(70 + int(p * 0.3), m),
+                                        race_btn_ctrl.update_loading(70 + int(p * 0.3), "DOWNLOADING"),
+                                    )
                                 ),
                             )
 
@@ -707,25 +1061,37 @@ def build_mission_control_dashboard() -> None:
                             })
 
                             def _finish_ok() -> None:
-                                update_race_gauge(100, f"Saved: {Path(out_file).name if out_file else 'Skipped'}")
+                                saved_name = Path(out_file).name if out_file else "Skipped"
+                                update_race_gauge(100, f"[✓] Saved: {saved_name}")
+                                race_btn_ctrl.approve(
+                                    "[✓] APPROVED // VIDEO DOWNLOADED",
+                                    banner_detail=f"[✓] TASK COMPLETE — Saved to: {out_file}",
+                                )
                                 race_result_summary.set_text(f"[✓] Saved to: {out_file}")
                                 race_result_summary.style("color: var(--green); font-size: 12px; font-weight: 600;")
                                 race_action_row.clear()
                                 if out_file and Path(out_file).exists():
                                     with race_action_row:
-                                        ui.button(
+                                        _, save_dev_ctrl = create_task_button(
                                             "Save to Device",
-                                            on_click=lambda p=out_file: ui.download(Path(p)),
-                                        ).classes("btn-tactical-primary")
-                                        ui.button(
+                                            variant="primary",
+                                        )
+                                        save_dev_ctrl.btn.on(
+                                            "click",
+                                            lambda _e=None, p=out_file, c=save_dev_ctrl: trigger_browser_download_with_feedback(
+                                                Path(p), c
+                                            ),
+                                        )
+                                        create_mc_button(
                                             "Play Video",
                                             on_click=lambda p=out_file: system_open(Path(p)),
-                                        ).classes("btn-tactical-secondary")
-                                        ui.button(
+                                            variant="secondary",
+                                        )
+                                        create_mc_button(
                                             "Open Folder",
                                             on_click=lambda p=out_file: system_open(Path(p).parent),
-                                        ).classes("btn-tactical-secondary")
-                                race_start_btn.enable()
+                                            variant="secondary",
+                                        )
                                 _refresh_history_panel()
 
                             dispatch_ui(_finish_ok)
@@ -733,17 +1099,17 @@ def build_mission_control_dashboard() -> None:
                             def _finish_fail() -> None:
                                 reason = "Timed out" if result.timed_out else "No video stream found"
                                 update_race_gauge(0, reason)
+                                race_btn_ctrl.fail(f"[!] {reason.upper()} — RETRY")
                                 race_result_summary.set_text(f"[-] {reason}. Try enabling Browser Sniffer or increasing timeout.")
                                 race_result_summary.style("color: var(--red); font-size: 12px;")
-                                race_start_btn.enable()
 
                             dispatch_ui(_finish_fail)
                     except Exception as exc:
                         def _finish_err(err_msg=str(exc)) -> None:
                             update_race_gauge(0, "Error")
+                            race_btn_ctrl.fail("[!] DOWNLOAD FAILED — RETRY")
                             race_result_summary.set_text(f"[-] {err_msg}")
                             race_result_summary.style("color: var(--red); font-size: 12px;")
-                            race_start_btn.enable()
                             show_system_modal("Download Failed", err_msg, is_fault=True)
 
                         dispatch_ui(_finish_err)
@@ -769,22 +1135,30 @@ def build_mission_control_dashboard() -> None:
                             "Source File or Folder",
                             placeholder="Select video, audio, GIF, image, or text...",
                         ).classes("mc-input flex-grow").props("outlined dense")
-                        ui.button(
-                            "File",
-                            on_click=lambda: open_disk_browser(
+                        _, conv_file_ctrl = create_task_button("File", variant="secondary")
+                        conv_file_ctrl.btn.on(
+                            "click",
+                            lambda: open_disk_browser(
                                 mode="file",
                                 title="Select File to Convert",
                                 on_select=lambda p: conv_input_path.set_value(str(p)),
+                                caller_ctrl=conv_file_ctrl,
+                                loading_label="SELECTING...",
+                                approved_label="[✓] FILE LOADED",
                             ),
-                        ).classes("btn-tactical-secondary")
-                        ui.button(
-                            "Folder",
-                            on_click=lambda: open_disk_browser(
+                        )
+                        _, conv_folder_ctrl = create_task_button("Folder", variant="secondary")
+                        conv_folder_ctrl.btn.on(
+                            "click",
+                            lambda: open_disk_browser(
                                 mode="folder",
                                 title="Select Folder to Batch Convert",
                                 on_select=lambda p: conv_input_path.set_value(str(p)),
+                                caller_ctrl=conv_folder_ctrl,
+                                loading_label="SELECTING...",
+                                approved_label="[✓] FOLDER LOADED",
                             ),
-                        ).classes("btn-tactical-secondary")
+                        )
 
                     with ui.row().classes("w-full gap-3 flex-wrap"):
                         conv_target_sel = ui.select(
@@ -821,15 +1195,26 @@ def build_mission_control_dashboard() -> None:
                     )
 
                     _, update_conv_gauge = create_fuel_gauge("Convert", "Ready")
+                    conv_approval_box = ui.column().classes("w-full")
+                    conv_approval_box.set_visibility(False)
                     conv_status_lbl = ui.label("").style("font-size: 11px; color: var(--muted);")
+
+                    conv_btn, conv_btn_ctrl = create_task_button(
+                        "Convert",
+                        variant="primary",
+                        extra_classes="w-full",
+                        approval_banner_container=conv_approval_box,
+                    )
 
                     def _run_conversion() -> None:
                         src_val = (conv_input_path.value or "").strip()
                         if not src_val:
+                            conv_btn_ctrl.fail("[!] SELECT INPUT FIRST")
                             show_system_modal("Missing Input", "Please select a file or folder first.", is_fault=True)
                             return
                         src_path = Path(src_val).resolve()
                         if not src_path.exists():
+                            conv_btn_ctrl.fail("[!] PATH NOT FOUND")
                             show_system_modal("Path Not Found", f"File or folder not found:\n{src_path}", is_fault=True)
                             return
 
@@ -844,8 +1229,17 @@ def build_mission_control_dashboard() -> None:
                         out_dir = get_tool_output_dir("converter")
                         out_dir.mkdir(parents=True, exist_ok=True)
 
+                        conv_btn_ctrl.start_loading(f"CONVERTING TO .{target_fmt.upper()}...")
+                        update_conv_gauge(10, f"Converting to .{target_fmt.upper()}...")
+                        conv_status_lbl.set_text("")
+
                         def _prog(pct: int, msg: str) -> None:
-                            dispatch_ui(lambda pct=pct, msg=msg: update_conv_gauge(pct, msg))
+                            dispatch_ui(
+                                lambda pct=pct, msg=msg: (
+                                    update_conv_gauge(pct, msg),
+                                    conv_btn_ctrl.update_loading(pct, f"CONVERTING .{target_fmt.upper()}"),
+                                )
+                            )
 
                         def _conv_worker() -> None:
                             try:
@@ -886,7 +1280,11 @@ def build_mission_control_dashboard() -> None:
                                     msg_done = f"[✓] Saved: {out_path}"
 
                                 def _done() -> None:
-                                    update_conv_gauge(100, "Done")
+                                    update_conv_gauge(100, "[✓] Conversion Complete")
+                                    conv_btn_ctrl.approve(
+                                        f"[✓] APPROVED // CONVERTED TO .{target_fmt.upper()}",
+                                        banner_detail=msg_done,
+                                    )
                                     conv_status_lbl.set_text(msg_done)
                                     conv_status_lbl.style("color: var(--green); font-size: 11px; font-weight: 600;")
 
@@ -894,6 +1292,7 @@ def build_mission_control_dashboard() -> None:
                             except Exception as exc:
                                 def _err(e_str=str(exc)) -> None:
                                     update_conv_gauge(0, "Error")
+                                    conv_btn_ctrl.fail("[!] CONVERSION FAILED — RETRY")
                                     conv_status_lbl.set_text(f"[-] {e_str}")
                                     conv_status_lbl.style("color: var(--red); font-size: 11px;")
                                     show_system_modal("Conversion Failed", e_str, is_fault=True)
@@ -902,7 +1301,7 @@ def build_mission_control_dashboard() -> None:
 
                         threading.Thread(target=_conv_worker, daemon=True).start()
 
-                    ui.button("Convert", on_click=_run_conversion).classes("btn-tactical-primary w-full")
+                    conv_btn.on("click", _run_conversion)
 
                 # 2B: Multi-Clip Video Combiner
                 with ui.column().classes("mc-panel p-5 gap-3 flex-1 min-w-[340px]"):
@@ -924,10 +1323,12 @@ def build_mission_control_dashboard() -> None:
                                     ui.label(f"{idx}. {clip.name}").style(
                                         "font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;"
                                     )
-                                    ui.button(
+                                    create_mc_button(
                                         "Remove",
-                                        on_click=lambda _e, i=idx - 1: (combine_queue.pop(i), _refresh_combine_queue()),
-                                    ).classes("btn-tactical-danger py-0 px-2 shrink-0")
+                                        on_click=lambda _e=None, i=idx - 1: (combine_queue.pop(i), _refresh_combine_queue()),
+                                        variant="danger",
+                                        extra_classes="py-0 px-2 shrink-0",
+                                    )
 
                     _refresh_combine_queue()
 
@@ -944,27 +1345,36 @@ def build_mission_control_dashboard() -> None:
                             _refresh_combine_queue()
 
                     with ui.row().classes("w-full gap-2 flex-wrap"):
-                        ui.button(
-                            "+ Add Video",
-                            on_click=lambda: open_disk_browser(
+                        _, add_vid_ctrl = create_task_button("+ Add Video", variant="secondary", extra_classes="flex-1")
+                        add_vid_ctrl.btn.on(
+                            "click",
+                            lambda: open_disk_browser(
                                 mode="file",
                                 title="Add Video Clip",
                                 allowed_exts=VIDEO_EXTENSIONS,
                                 on_select=_add_clip_file,
+                                caller_ctrl=add_vid_ctrl,
+                                loading_label="SELECTING...",
+                                approved_label="[✓] CLIP ADDED",
                             ),
-                        ).classes("btn-tactical-secondary flex-1")
-                        ui.button(
-                            "+ Add Folder",
-                            on_click=lambda: open_disk_browser(
+                        )
+                        _, add_fld_ctrl = create_task_button("+ Add Folder", variant="secondary", extra_classes="flex-1")
+                        add_fld_ctrl.btn.on(
+                            "click",
+                            lambda: open_disk_browser(
                                 mode="folder",
                                 title="Add Videos from Folder",
                                 on_select=_add_clip_folder,
+                                caller_ctrl=add_fld_ctrl,
+                                loading_label="SELECTING...",
+                                approved_label="[✓] CLIPS ADDED",
                             ),
-                        ).classes("btn-tactical-secondary flex-1")
-                        ui.button(
+                        )
+                        create_mc_button(
                             "Clear",
                             on_click=lambda: (combine_queue.clear(), _refresh_combine_queue()),
-                        ).classes("btn-tactical-danger")
+                            variant="danger",
+                        )
 
                     with ui.row().classes("w-full gap-3 flex-wrap"):
                         comb_order_sel = ui.select(
@@ -985,10 +1395,20 @@ def build_mission_control_dashboard() -> None:
                     )
 
                     _, update_comb_gauge = create_fuel_gauge("Merge", "Ready")
+                    comb_approval_box = ui.column().classes("w-full")
+                    comb_approval_box.set_visibility(False)
                     comb_status_lbl = ui.label("").style("font-size: 11px; color: var(--muted);")
+
+                    comb_btn, comb_btn_ctrl = create_task_button(
+                        "Merge Videos",
+                        variant="primary",
+                        extra_classes="w-full",
+                        approval_banner_container=comb_approval_box,
+                    )
 
                     def _run_combine() -> None:
                         if len(combine_queue) < 2:
+                            comb_btn_ctrl.fail("[!] ADD 2+ CLIPS FIRST")
                             show_system_modal("Need More Clips", "Add at least 2 video files before merging.", is_fault=True)
                             return
                         clips_copy = list(combine_queue)
@@ -999,6 +1419,10 @@ def build_mission_control_dashboard() -> None:
                         out_dir.mkdir(parents=True, exist_ok=True)
                         first_stem = safe_filename(clips_copy[0].stem)
                         out_file = out_dir / f"combined_{first_stem}_{len(clips_copy)}clips.mp4"
+
+                        comb_btn_ctrl.start_loading(f"MERGING {len(clips_copy)} CLIPS...")
+                        update_comb_gauge(10, f"Merging {len(clips_copy)} clips...")
+                        comb_status_lbl.set_text("")
 
                         def _c_worker() -> None:
                             try:
@@ -1011,17 +1435,25 @@ def build_mission_control_dashboard() -> None:
                                     hwaccel=conv_hw_sel.value or "auto",
                                     resolution=res_val,
                                     progress_callback=lambda pct, msg: dispatch_ui(
-                                        lambda pct=pct, msg=msg: update_comb_gauge(pct, msg)
+                                        lambda pct=pct, msg=msg: (
+                                            update_comb_gauge(pct, msg),
+                                            comb_btn_ctrl.update_loading(pct, "MERGING CLIPS"),
+                                        )
                                     ),
                                 )
                                 def _c_done() -> None:
-                                    update_comb_gauge(100, f"Merged {len(clips_copy)} clips")
+                                    update_comb_gauge(100, f"[✓] Merged {len(clips_copy)} clips")
+                                    comb_btn_ctrl.approve(
+                                        f"[✓] APPROVED // MERGED {len(clips_copy)} CLIPS",
+                                        banner_detail=f"[✓] Saved merged video: {final_p}",
+                                    )
                                     comb_status_lbl.set_text(f"[✓] Saved: {final_p}")
                                     comb_status_lbl.style("color: var(--green); font-size: 11px; font-weight: 600;")
                                 dispatch_ui(_c_done)
                             except Exception as exc:
                                 def _c_err(e_str=str(exc)) -> None:
                                     update_comb_gauge(0, "Error")
+                                    comb_btn_ctrl.fail("[!] MERGE FAILED — RETRY")
                                     comb_status_lbl.set_text(f"[-] {e_str}")
                                     comb_status_lbl.style("color: var(--red); font-size: 11px;")
                                     show_system_modal("Merge Failed", e_str, is_fault=True)
@@ -1029,7 +1461,7 @@ def build_mission_control_dashboard() -> None:
 
                         threading.Thread(target=_c_worker, daemon=True).start()
 
-                    ui.button("Merge Videos", on_click=_run_combine).classes("btn-tactical-primary w-full")
+                    comb_btn.on("click", _run_combine)
 
         # ====================================================================
         # TAB 03 // COMIC & GALLERY SCRAPER
@@ -1046,14 +1478,18 @@ def build_mission_control_dashboard() -> None:
                         "Chapter URL or Local Folder",
                         placeholder="https://example.com/chapter-1 or local path...",
                     ).classes("mc-input flex-grow").props("outlined dense")
-                    ui.button(
-                        "Browse",
-                        on_click=lambda: open_disk_browser(
+                    _, comic_browse_ctrl = create_task_button("Browse", variant="secondary")
+                    comic_browse_ctrl.btn.on(
+                        "click",
+                        lambda: open_disk_browser(
                             mode="any",
                             title="Select HTML File or Folder",
                             on_select=lambda p: comic_src_input.set_value(str(p)),
+                            caller_ctrl=comic_browse_ctrl,
+                            loading_label="SELECTING...",
+                            approved_label="[✓] SOURCE LOADED",
                         ),
-                    ).classes("btn-tactical-secondary")
+                    )
 
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     comic_fmt_sel = ui.select(
@@ -1072,15 +1508,19 @@ def build_mission_control_dashboard() -> None:
                         "Cookies.txt (Optional)",
                         placeholder="Optional cookie file path...",
                     ).classes("mc-input flex-1 min-w-[200px]").props("outlined dense")
-                    ui.button(
-                        "Cookies",
-                        on_click=lambda: open_disk_browser(
+                    _, comic_cookie_ctrl = create_task_button("Cookies", variant="secondary")
+                    comic_cookie_ctrl.btn.on(
+                        "click",
+                        lambda: open_disk_browser(
                             mode="file",
                             title="Select cookies.txt",
                             allowed_exts={".txt"},
                             on_select=lambda p: comic_cookie_input.set_value(str(p)),
+                            caller_ctrl=comic_cookie_ctrl,
+                            loading_label="SELECTING...",
+                            approved_label="[✓] COOKIES LOADED",
                         ),
-                    ).classes("btn-tactical-secondary")
+                    )
 
                 comic_robots_sw = create_rocker_switch(
                     "Respect robots.txt",
@@ -1088,17 +1528,31 @@ def build_mission_control_dashboard() -> None:
                 )
 
                 _, update_comic_gauge = create_fuel_gauge("Scraper", "Ready")
+                comic_approval_box = ui.column().classes("w-full")
+                comic_approval_box.set_visibility(False)
                 comic_result_lbl = ui.label("").style("font-size: 12px; color: var(--muted);")
+
+                comic_btn, comic_btn_ctrl = create_task_button(
+                    "Start Download",
+                    variant="primary",
+                    extra_classes="w-full",
+                    approval_banner_container=comic_approval_box,
+                )
 
                 def _run_comic_scraper() -> None:
                     src = (comic_src_input.value or "").strip()
                     if not src:
+                        comic_btn_ctrl.fail("[!] ENTER URL OR FOLDER FIRST")
                         show_system_modal("Missing URL", "Enter a chapter URL or select a local folder.", is_fault=True)
                         return
                     fmt_val = None if comic_fmt_sel.value == "none" else comic_fmt_sel.value
                     cookie_val = (comic_cookie_input.value or "").strip() or None
                     order_val = comic_order_sel.value or "ascending"
                     robots_val = comic_robots_sw["checked"]
+
+                    comic_btn_ctrl.start_loading("SCRAPING & DOWNLOADING CHAPTER...")
+                    update_comic_gauge(10, "Scraping chapter images...")
+                    comic_result_lbl.set_text("")
 
                     def _cm_worker() -> None:
                         try:
@@ -1110,17 +1564,25 @@ def build_mission_control_dashboard() -> None:
                                 respect_robots=robots_val,
                                 order=order_val,
                                 progress_callback=lambda pct, msg: dispatch_ui(
-                                    lambda pct=pct, msg=msg: update_comic_gauge(pct, msg)
+                                    lambda pct=pct, msg=msg: (
+                                        update_comic_gauge(pct, msg),
+                                        comic_btn_ctrl.update_loading(pct, "SCRAPING CHAPTER"),
+                                    )
                                 ),
                             )
                             def _cm_done() -> None:
-                                update_comic_gauge(100, f"Saved: {out_p.name}")
+                                update_comic_gauge(100, f"[✓] Saved: {out_p.name}")
+                                comic_btn_ctrl.approve(
+                                    "[✓] APPROVED // CHAPTER DOWNLOADED",
+                                    banner_detail=f"[✓] Saved chapter to: {out_p}",
+                                )
                                 comic_result_lbl.set_text(f"[✓] Saved to: {out_p}")
                                 comic_result_lbl.style("color: var(--green); font-size: 12px; font-weight: 600;")
                             dispatch_ui(_cm_done)
                         except Exception as exc:
                             def _cm_err(e_str=str(exc)) -> None:
                                 update_comic_gauge(0, "Error")
+                                comic_btn_ctrl.fail("[!] SCRAPER FAILED — RETRY")
                                 comic_result_lbl.set_text(f"[-] {e_str}")
                                 comic_result_lbl.style("color: var(--red); font-size: 12px;")
                                 show_system_modal("Scraper Failed", e_str, is_fault=True)
@@ -1128,7 +1590,7 @@ def build_mission_control_dashboard() -> None:
 
                     threading.Thread(target=_cm_worker, daemon=True).start()
 
-                ui.button("Start Download", on_click=_run_comic_scraper).classes("btn-tactical-primary w-full")
+                comic_btn.on("click", _run_comic_scraper)
 
         # ====================================================================
         # TAB 04 // FOLDER TO PDF / CBZ PACKAGER
@@ -1153,14 +1615,18 @@ def build_mission_control_dashboard() -> None:
                         "Image Folder",
                         placeholder="Select a folder containing images...",
                     ).classes("mc-input flex-grow").props("outlined dense")
-                    ui.button(
-                        "Browse Folder",
-                        on_click=lambda: open_disk_browser(
+                    _, pack_browse_ctrl = create_task_button("Browse Folder", variant="secondary")
+                    pack_browse_ctrl.btn.on(
+                        "click",
+                        lambda: open_disk_browser(
                             mode="folder",
                             title="Select Image Folder",
                             on_select=_on_pack_folder_selected,
+                            caller_ctrl=pack_browse_ctrl,
+                            loading_label="SCANNING...",
+                            approved_label="[✓] FOLDER LOADED",
                         ),
-                    ).classes("btn-tactical-secondary")
+                    )
 
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     pack_fmt_sel = ui.select(
@@ -1181,15 +1647,26 @@ def build_mission_control_dashboard() -> None:
                 )
 
                 _, update_pack_gauge = create_fuel_gauge("Packager", "Ready")
+                pack_approval_box = ui.column().classes("w-full")
+                pack_approval_box.set_visibility(False)
                 pack_result_lbl = ui.label("").style("font-size: 12px; color: var(--muted);")
+
+                pack_btn, pack_btn_ctrl = create_task_button(
+                    "Create Archive",
+                    variant="primary",
+                    extra_classes="w-full",
+                    approval_banner_container=pack_approval_box,
+                )
 
                 def _run_packager() -> None:
                     f_val = (pack_folder_input.value or "").strip()
                     if not f_val:
+                        pack_btn_ctrl.fail("[!] SELECT IMAGE FOLDER FIRST")
                         show_system_modal("Missing Folder", "Select an image folder first.", is_fault=True)
                         return
                     folder_p = Path(f_val).resolve()
                     if not folder_p.is_dir():
+                        pack_btn_ctrl.fail("[!] INVALID DIRECTORY")
                         show_system_modal("Invalid Folder", f"Directory not found:\n{folder_p}", is_fault=True)
                         return
                     fmt = pack_fmt_sel.value or "pdf"
@@ -1197,6 +1674,10 @@ def build_mission_control_dashboard() -> None:
                     recurse_v = pack_recurse_sw["checked"]
                     out_base = get_tool_output_dir("packager")
                     out_base.mkdir(parents=True, exist_ok=True)
+
+                    pack_btn_ctrl.start_loading(f"PACKAGING .{fmt.upper()} ARCHIVE...")
+                    update_pack_gauge(10, f"Packaging .{fmt.upper()} archive...")
+                    pack_result_lbl.set_text("")
 
                     def _pk_worker() -> None:
                         try:
@@ -1208,7 +1689,10 @@ def build_mission_control_dashboard() -> None:
                                     recurse=True,
                                     order=order_v,
                                     progress_callback=lambda pct, msg: dispatch_ui(
-                                        lambda pct=pct, msg=msg: update_pack_gauge(pct, msg)
+                                        lambda pct=pct, msg=msg: (
+                                            update_pack_gauge(pct, msg),
+                                            pack_btn_ctrl.update_loading(pct, f"PACKAGING .{fmt.upper()}"),
+                                        )
                                     ),
                                 )
                                 summary = f"[✓] Created {len(results)} archive(s) in {out_base}"
@@ -1220,7 +1704,10 @@ def build_mission_control_dashboard() -> None:
                                         dest_file,
                                         order=order_v,
                                         progress_callback=lambda pct, msg: dispatch_ui(
-                                            lambda pct=pct, msg=msg: update_pack_gauge(pct, msg)
+                                            lambda pct=pct, msg=msg: (
+                                                update_pack_gauge(pct, msg),
+                                                pack_btn_ctrl.update_loading(pct, "PACKAGING CBZ"),
+                                            )
                                         ),
                                     )
                                 else:
@@ -1229,7 +1716,10 @@ def build_mission_control_dashboard() -> None:
                                         dest_file,
                                         order=order_v,
                                         progress_callback=lambda pct, msg: dispatch_ui(
-                                            lambda pct=pct, msg=msg: update_pack_gauge(pct, msg)
+                                            lambda pct=pct, msg=msg: (
+                                                update_pack_gauge(pct, msg),
+                                                pack_btn_ctrl.update_loading(pct, "PACKAGING PDF"),
+                                            )
                                         ),
                                     )
                                 if not ok:
@@ -1237,7 +1727,11 @@ def build_mission_control_dashboard() -> None:
                                 summary = f"[✓] Saved {cnt} pages -> {dest_file}"
 
                             def _pk_done() -> None:
-                                update_pack_gauge(100, "Done")
+                                update_pack_gauge(100, "[✓] Archive Ready")
+                                pack_btn_ctrl.approve(
+                                    f"[✓] APPROVED // .{fmt.upper()} ARCHIVE CREATED",
+                                    banner_detail=summary,
+                                )
                                 pack_result_lbl.set_text(summary)
                                 pack_result_lbl.style("color: var(--green); font-size: 12px; font-weight: 600;")
 
@@ -1245,6 +1739,7 @@ def build_mission_control_dashboard() -> None:
                         except Exception as exc:
                             def _pk_err(e_str=str(exc)) -> None:
                                 update_pack_gauge(0, "Error")
+                                pack_btn_ctrl.fail("[!] ARCHIVE FAILED — RETRY")
                                 pack_result_lbl.set_text(f"[-] {e_str}")
                                 pack_result_lbl.style("color: var(--red); font-size: 12px;")
                                 show_system_modal("Packager Failed", e_str, is_fault=True)
@@ -1253,7 +1748,7 @@ def build_mission_control_dashboard() -> None:
 
                     threading.Thread(target=_pk_worker, daemon=True).start()
 
-                ui.button("Create Archive", on_click=_run_packager).classes("btn-tactical-primary w-full")
+                pack_btn.on("click", _run_packager)
 
         # ====================================================================
         # TAB 05 // IMAGE OCR
@@ -1275,23 +1770,31 @@ def build_mission_control_dashboard() -> None:
                         "Image File or Folder",
                         placeholder="Select an image or folder of images...",
                     ).classes("mc-input flex-grow").props("outlined dense")
-                    ui.button(
-                        "File",
-                        on_click=lambda: open_disk_browser(
+                    _, ocr_file_ctrl = create_task_button("File", variant="secondary")
+                    ocr_file_ctrl.btn.on(
+                        "click",
+                        lambda: open_disk_browser(
                             mode="file",
                             title="Select Image for OCR",
                             allowed_exts=IMAGE_EXTENSIONS,
                             on_select=lambda p: ocr_target_input.set_value(str(p)),
+                            caller_ctrl=ocr_file_ctrl,
+                            loading_label="SELECTING...",
+                            approved_label="[✓] IMAGE LOADED",
                         ),
-                    ).classes("btn-tactical-secondary")
-                    ui.button(
-                        "Folder",
-                        on_click=lambda: open_disk_browser(
+                    )
+                    _, ocr_folder_ctrl = create_task_button("Folder", variant="secondary")
+                    ocr_folder_ctrl.btn.on(
+                        "click",
+                        lambda: open_disk_browser(
                             mode="folder",
                             title="Select Folder for Batch OCR",
                             on_select=lambda p: ocr_target_input.set_value(str(p)),
+                            caller_ctrl=ocr_folder_ctrl,
+                            loading_label="SELECTING...",
+                            approved_label="[✓] FOLDER LOADED",
                         ),
-                    ).classes("btn-tactical-secondary")
+                    )
 
                 with ui.row().classes("w-full gap-3 flex-wrap"):
                     ocr_lang_sel = ui.select(
@@ -1321,6 +1824,8 @@ def build_mission_control_dashboard() -> None:
                 )
 
                 _, update_ocr_gauge = create_fuel_gauge("OCR", "Ready")
+                ocr_approval_box = ui.column().classes("w-full")
+                ocr_approval_box.set_visibility(False)
 
                 ocr_preview_area = ui.textarea(
                     label="Extracted Text",
@@ -1328,18 +1833,30 @@ def build_mission_control_dashboard() -> None:
                 ).classes("mc-input w-full").props("outlined rows=8 readonly")
 
                 with ui.row().classes("w-full gap-2"):
+                    ocr_btn, ocr_btn_ctrl = create_task_button(
+                        "Extract Text",
+                        variant="primary",
+                        extra_classes="flex-grow",
+                        approval_banner_container=ocr_approval_box,
+                    )
+
                     def _run_ocr_job() -> None:
                         t_val = (ocr_target_input.value or "").strip()
                         if not t_val:
+                            ocr_btn_ctrl.fail("[!] SELECT IMAGE FIRST")
                             show_system_modal("Missing Image", "Select an image file or folder first.", is_fault=True)
                             return
                         if not is_tesseract_available():
+                            ocr_btn_ctrl.fail("[!] TESSERACT MISSING")
                             show_system_modal("Tesseract Not Installed", get_tesseract_install_hint(), is_fault=True)
                             return
 
                         lang_v = ocr_lang_sel.value or "eng"
                         comb_v = ocr_combine_sw["checked"]
                         ord_v = ocr_order_sel.value or "ascending"
+
+                        ocr_btn_ctrl.start_loading(f"EXTRACTING TEXT ({lang_v.upper()})...")
+                        update_ocr_gauge(10, f"Running OCR ({lang_v})...")
 
                         def _o_worker() -> None:
                             try:
@@ -1350,29 +1867,39 @@ def build_mission_control_dashboard() -> None:
                                     combine_output=comb_v,
                                     order=ord_v,
                                     progress_callback=lambda pct, msg: dispatch_ui(
-                                        lambda pct=pct, msg=msg: update_ocr_gauge(pct, msg)
+                                        lambda pct=pct, msg=msg: (
+                                            update_ocr_gauge(pct, msg),
+                                            ocr_btn_ctrl.update_loading(pct, "RUNNING OCR"),
+                                        )
                                     ),
                                 )
                                 def _o_done() -> None:
-                                    update_ocr_gauge(100, f"Saved: {out_p.name}")
+                                    update_ocr_gauge(100, f"[✓] Saved: {out_p.name}")
+                                    ocr_btn_ctrl.approve(
+                                        "[✓] APPROVED // TEXT EXTRACTED",
+                                        banner_detail=f"[✓] OCR transcript saved to: {out_p}",
+                                    )
                                     ocr_preview_area.set_value(preview_txt or "(No text detected)")
                                 dispatch_ui(_o_done)
                             except Exception as exc:
                                 def _o_err(e_str=str(exc)) -> None:
                                     update_ocr_gauge(0, "Error")
+                                    ocr_btn_ctrl.fail("[!] OCR FAILED — RETRY")
                                     show_system_modal("OCR Failed", e_str, is_fault=True)
                                 dispatch_ui(_o_err)
 
                         threading.Thread(target=_o_worker, daemon=True).start()
 
-                    ui.button("Extract Text", on_click=_run_ocr_job).classes("btn-tactical-primary flex-grow")
-                    ui.button(
+                    ocr_btn.on("click", _run_ocr_job)
+
+                    create_mc_button(
                         "Copy Text",
                         on_click=lambda: (
                             ui.run_javascript(f"navigator.clipboard.writeText({json.dumps(ocr_preview_area.value or '')});"),
                             show_system_modal("Copied", "Text copied to clipboard."),
                         ),
-                    ).classes("btn-tactical-secondary")
+                        variant="secondary",
+                    )
 
         # ====================================================================
         # TAB 06 // FOLDERS & HISTORY
@@ -1406,9 +1933,9 @@ def build_mission_control_dashboard() -> None:
                                         ui.label(t_label).style("font-size: 11px; font-weight: 700; color: var(--green);")
                                         ui.label(str(resolved_p)).style("font-size: 11px; color: var(--ink); word-break: break-all;")
                                     with ui.row().classes("gap-1 no-wrap shrink-0"):
-                                        ui.button(
+                                        create_mc_button(
                                             "Change",
-                                            on_click=lambda _e, tool_key=t_id: open_disk_browser(
+                                            on_click=lambda _e=None, tool_key=t_id: open_disk_browser(
                                                 mode="folder",
                                                 title=f"Select {tool_key.capitalize()} Folder",
                                                 initial_dir=get_tool_output_dir(tool_key),
@@ -1417,37 +1944,49 @@ def build_mission_control_dashboard() -> None:
                                                     _render_dir_matrix(),
                                                 ),
                                             ),
-                                        ).classes("btn-tactical-secondary py-1 px-2")
-                                        ui.button(
+                                            variant="secondary",
+                                            extra_classes="py-1 px-2",
+                                        )
+                                        create_mc_button(
                                             "Open",
-                                            on_click=lambda _e, rp=resolved_p: system_open(rp),
-                                        ).classes("btn-tactical-secondary py-1 px-2")
+                                            on_click=lambda _e=None, rp=resolved_p: system_open(rp),
+                                            variant="secondary",
+                                            extra_classes="py-1 px-2",
+                                        )
 
                     _render_dir_matrix()
 
                     with ui.row().classes("w-full gap-2 pt-2 flex-wrap"):
-                        ui.button(
+                        create_mc_button(
                             "Auto-Separate Folders",
                             on_click=lambda: (
                                 auto_separate_all_tool_dirs(),
                                 _render_dir_matrix(),
                                 show_system_modal("Folders Updated", "Created separate subfolders (Converted, Comics, Packaged, OCR)."),
                             ),
-                        ).classes("btn-tactical-primary flex-1")
-                        ui.button(
+                            variant="primary",
+                            extra_classes="flex-1",
+                        )
+                        create_mc_button(
                             "Reset Defaults",
                             on_click=lambda: (
                                 reset_all_tool_dirs_to_defaults(),
                                 _render_dir_matrix(),
                                 show_system_modal("Reset Complete", "All output folders reset to default Downloads."),
                             ),
-                        ).classes("btn-tactical-secondary")
+                            variant="secondary",
+                        )
 
                 # 6B: Recent Downloads
                 with ui.column().classes("mc-panel p-5 gap-3 flex-1 min-w-[340px]"):
                     with ui.row().classes("w-full items-center justify-between"):
                         ui.label("RECENT DOWNLOADS").classes("display-title text-2xl")
-                        ui.button("Refresh", on_click=lambda: _refresh_history_panel()).classes("btn-tactical-secondary py-1 px-2")
+                        create_mc_button(
+                            "Refresh",
+                            on_click=lambda: _refresh_history_panel(),
+                            variant="secondary",
+                            extra_classes="py-1 px-2",
+                        )
 
                     history_box = ui.column().classes("w-full gap-2 max-h-[380px] overflow-y-auto pr-1")
 
@@ -1475,14 +2014,23 @@ def build_mission_control_dashboard() -> None:
                                         )
                                         if out_str and Path(out_str).exists():
                                             with ui.row().classes("gap-1"):
-                                                ui.button(
+                                                _, hist_save_ctrl = create_task_button(
                                                     "Save",
-                                                    on_click=lambda _e, p=out_str: ui.download(Path(p)),
-                                                ).classes("btn-tactical-primary py-0 px-2")
-                                                ui.button(
+                                                    variant="primary",
+                                                    extra_classes="py-0 px-2",
+                                                )
+                                                hist_save_ctrl.btn.on(
+                                                    "click",
+                                                    lambda _e=None, p=out_str, c=hist_save_ctrl: trigger_browser_download_with_feedback(
+                                                        Path(p), c
+                                                    ),
+                                                )
+                                                create_mc_button(
                                                     "Play",
-                                                    on_click=lambda _e, p=out_str: system_open(Path(p)),
-                                                ).classes("btn-tactical-secondary py-0 px-2")
+                                                    on_click=lambda _e=None, p=out_str: system_open(Path(p)),
+                                                    variant="secondary",
+                                                    extra_classes="py-0 px-2",
+                                                )
                                     ui.label(rec.get("url", "")).style(
                                         "font-size: 10px; color: var(--muted); word-break: break-all;"
                                     )
