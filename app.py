@@ -81,4 +81,4 @@ with gr.Blocks(title="Tool-Kit Media Extractor") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(ssr_mode=False)
