@@ -994,13 +994,47 @@ class TestConverterAndCombineArrowWorkflow(unittest.TestCase):
              patch("video_downloader.menu.browse_interactive_path", side_effect=[vid1, vid2]), \
              patch("video_downloader.menu.clear_screen"), \
              patch("video_downloader.converter.combine_videos", return_value=Path("out.mp4")) as mock_comb, \
-             patch("video_downloader.utils.load_config", return_value=self.cfg):
+             patch("video_downloader.utils.load_config", return_value={"download_directory": str(self.test_dir)}):
 
-            ret = action_combine_videos(self.cfg)
+            ret = action_combine_videos({"download_directory": str(self.test_dir)})
             self.assertIsNotNone(ret)
             mock_comb.assert_called_once()
-            # Verify order='random' passed to combine_videos
             self.assertEqual(mock_comb.call_args.kwargs.get("order"), "random")
+
+    def test_action_settings_hwaccel_and_preset_toggle(self):
+        """Test toggling GPU Hardware Acceleration and Video Encoding Preset in action_settings."""
+        from video_downloader.menu import action_settings
+
+        config = {
+            "version": "0.2.0",
+            "video_hwaccel": "auto",
+            "encoding_preset": "ultrafast",
+            "auto_open": True,
+            "use_ytdlp": True,
+            "use_scrapling": True,
+            "use_static_scanner": True,
+            "use_browser": True,
+            "spawn_terminals": False,
+            "race_timeout": 20,
+            "browser_grace_seconds": 2.5,
+            "merge_format": "mp4",
+            "confidence_threshold": 50,
+        }
+
+        # Press '8' (GPU hwaccel item 7: 1-indexed key '8'), then '9' (preset item 8: key '9'), then '0' (exit)
+        # Note: In menu items:
+        # idx 0: Auto-Open, idx 1: Conflict, idx 2: Container, idx 3: Timeout, idx 4: Grace, idx 5: Confidence, idx 6: Terminals,
+        # idx 7: GPU hwaccel (key '8'), idx 8: Preset (key '9')
+        keys = ["8", "9", "0"]
+        with patch("video_downloader.menu.read_key", side_effect=keys), \
+             patch("video_downloader.menu.clear_screen"), \
+             patch("video_downloader.menu.save_config", return_value=True):
+            action_settings(config)
+            # 'auto' toggles to 'gpu'
+            self.assertEqual(config.get("video_hwaccel"), "gpu")
+            # 'ultrafast' toggles to 'veryfast'
+            self.assertEqual(config.get("encoding_preset"), "veryfast")
+
 
 if __name__ == "__main__":
     unittest.main()

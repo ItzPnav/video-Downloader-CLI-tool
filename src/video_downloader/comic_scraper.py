@@ -2,7 +2,7 @@
 Comic & Image Gallery Scraper Engine for Video Extractor CLI.
 Extracts, downloads, and organizes comic/manga chapters and image galleries from
 live URLs, saved local HTML files, or local image folders with Cloudflare bypass,
-User-Agent rotation, cookie file support, and optional PDF/CBZ bundling.
+automated browser solver, cookie file support, and optional PDF/CBZ bundling.
 """
 
 import os
@@ -105,6 +105,165 @@ def is_allowed_by_robots(url: str, user_agent: str = "*") -> bool:
         return True
 
 
+def is_cloudflare_challenge(status_code: int, html_text: str) -> bool:
+    """Detect if response is a Cloudflare anti-bot challenge or 403 Forbidden."""
+    if status_code in (401, 403, 429, 503):
+        return True
+    text_lower = (html_text or "").lower()
+    challenge_indicators = (
+        "just a moment...",
+        "attention required! | cloudflare",
+        "cf-browser-verification",
+        "verify you are human",
+        "challenges.cloudflare.com",
+        "enable javascript and cookies to continue",
+        "<title>just a moment",
+    )
+    return any(ind in text_lower for ind in challenge_indicators)
+
+
+def fetch_html_with_browser_solver(
+    url: str,
+    session: requests.Session,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    timeout: int = 30,
+) -> tuple[str, str]:
+    """
+    Solve Cloudflare challenge and fetch rendered DOM using browser automation.
+    Tries fast Scrapling stealth, then headless Chrome; escalates to headful window
+    if manual Turnstile interaction is required. Syncs clearance cookies to session.
+    """
+    # 1. Fast attempt via Scrapling StealthyFetcher if available
+    try:
+        from scrapling import StealthyFetcher
+        if progress_callback:
+            progress_callback(7, "Browser solver: attempting fast stealth fetch...")
+        sf_resp = StealthyFetcher.fetch(url, headless=True)
+        sf_status = getattr(sf_resp, "status", None)
+        sf_text = getattr(sf_resp, "text", "") or ""
+        if sf_status == 200 and not is_cloudflare_challenge(sf_status, sf_text):
+            return sf_text, url
+    except Exception:
+        pass
+
+    # 2. Selenium Automated Resolution
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service
+    except ImportError:
+        raise PermissionError(
+            f"Automated browser solver requires Selenium.\n"
+            f"  [Tip] Save the page in your browser (Ctrl+S) and pass the .html file to the scraper,\n"
+            f"        or supply a cookies.txt file containing your cf_clearance cookie."
+        )
+
+    from .browser_scanner import find_chromium, find_driver
+
+    chromium_bin = find_chromium()
+    driver_bin = find_driver()
+    ua = USER_AGENTS[0]
+
+    def _create_options(headless: bool = True) -> Options:
+        opts = Options()
+        if chromium_bin:
+            opts.binary_location = chromium_bin
+        if headless:
+            opts.add_argument("--headless=new")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--window-size=1280,800")
+        opts.add_argument(f"user-agent={ua}")
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+        return opts
+
+    def _apply_stealth(drv):
+        try:
+            drv.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {
+                    "source": """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        });
+                    """
+                },
+            )
+        except Exception:
+            pass
+
+    import time
+    driver = None
+    solved = False
+    html_source = ""
+    final_url = url
+
+    # Attempt A: Headless Chrome
+    try:
+        if progress_callback:
+            progress_callback(8, "Browser solver: testing headless challenge resolution...")
+        opts = _create_options(headless=True)
+        service = Service(driver_bin) if driver_bin else None
+        driver = webdriver.Chrome(service=service, options=opts) if service else webdriver.Chrome(options=opts)
+        _apply_stealth(driver)
+        driver.set_page_load_timeout(25)
+
+        try:
+            driver.get(url)
+        except Exception:
+            pass
+
+        for _ in range(7):
+            time.sleep(1)
+            title = (driver.title or "").strip()
+            if title and "just a moment" not in title.lower() and "attention required" not in title.lower():
+                solved = True
+                html_source = driver.page_source
+                final_url = driver.current_url
+                break
+    except Exception:
+        pass
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+            driver = None
+
+    if not solved or not html_source:
+        raise PermissionError(
+            f"Could not bypass Cloudflare anti-bot protection for: {url}\n"
+            f"  [Tip 1] Open the page in your browser, press Ctrl+S to save as an HTML file, then run:\n"
+            f"          tools comic <saved_file.html>\n"
+            f"  [Tip 2] Export your browser cookies (cookies.txt) via 'Get cookies.txt LOCALLY' and pass --cookies."
+        )
+
+    # Sync cookies & User-Agent to the requests Session
+    try:
+        browser_cookies = driver.get_cookies()
+        for ck in browser_cookies:
+            session.cookies.set(
+                ck["name"],
+                ck["value"],
+                domain=ck.get("domain", ""),
+                path=ck.get("path", "/"),
+            )
+        session.headers["User-Agent"] = ua
+    except Exception:
+        pass
+
+    try:
+        driver.quit()
+    except Exception:
+        pass
+
+    return html_source, final_url
+
+
 def extract_images_from_html(html_text: str, base_url: str) -> List[str]:
     """Parse HTML and extract unique image URLs in sequential DOM occurrence order."""
     soup = BeautifulSoup(html_text, "html.parser")
@@ -185,7 +344,10 @@ def download_single_image(
 
     part_path = target_path.with_suffix(target_path.suffix + ".part")
     req_headers = dict(DEFAULT_HEADERS)
-    if rotate_ua:
+    session_ua = session.headers.get("User-Agent")
+    if session_ua:
+        req_headers["User-Agent"] = session_ua
+    elif rotate_ua:
         req_headers["User-Agent"] = random.choice(USER_AGENTS)
     if headers:
         req_headers.update(headers)
@@ -291,11 +453,37 @@ def scrape_and_download_comic(
         if progress_callback:
             progress_callback(5, f"Fetching page: {src_str}...")
 
-        resp = session.get(src_str, timeout=20)
-        resp.raise_for_status()
-        html_text = resp.text
+        html_text = None
         base_url = src_str
-        parsed = urlparse(src_str)
+        use_browser_fallback = False
+
+        try:
+            resp = session.get(src_str, timeout=20)
+            if is_cloudflare_challenge(resp.status_code, resp.text):
+                use_browser_fallback = True
+            else:
+                resp.raise_for_status()
+                html_text = resp.text
+        except requests.exceptions.RequestException as req_err:
+            status_code = getattr(getattr(req_err, "response", None), "status_code", 0)
+            err_text = getattr(getattr(req_err, "response", None), "text", "")
+            if status_code in (401, 403, 429, 503) or is_cloudflare_challenge(status_code, err_text):
+                use_browser_fallback = True
+            else:
+                raise
+
+        if use_browser_fallback:
+            if progress_callback:
+                progress_callback(7, "Cloudflare protection detected. Launching browser solver...")
+            print("\n[!] Cloudflare challenge detected on destination site.")
+            print("[+] Escalating to automated browser solver...")
+            html_text, base_url = fetch_html_with_browser_solver(
+                src_str,
+                session=session,
+                progress_callback=progress_callback,
+            )
+
+        parsed = urlparse(base_url)
         fallback_name = Path(parsed.path).stem or "Comic_Download"
         folder_title = get_html_title(html_text, fallback=fallback_name)
 

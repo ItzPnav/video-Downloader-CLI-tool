@@ -13,6 +13,7 @@ import time
 import shutil
 import tempfile
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple
@@ -58,6 +59,223 @@ def find_ffprobe() -> Optional[str]:
     if exe:
         return exe
     return None
+
+
+@dataclass
+class VideoEncoderInfo:
+    encoder: str
+    preset: str
+    video_args: list[str]
+    description: str
+    is_hardware: bool
+
+
+_CACHED_HARDWARE_ENCODER: Optional[Tuple[str, str, bool]] = None
+
+
+def probe_encoder(
+    ffmpeg_exe: str,
+    encoder_name: str,
+    test_args: list[str],
+) -> bool:
+    """Run a fast non-blocking probe to verify whether an encoder actually functions on the active GPU/OS."""
+    if not ffmpeg_exe:
+        return False
+    try:
+        cmd = [
+            ffmpeg_exe,
+            "-y",
+            "-v", "error",
+            "-f", "lavfi",
+            "-i", "testsrc=duration=0.1:size=320x240:rate=10",
+            "-vf", "format=yuv420p",
+            "-c:v", encoder_name,
+            *test_args,
+            "-f", "null",
+            "-",
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def detect_hardware_encoder(
+    ffmpeg_exe: Optional[str] = None,
+    force_reprobe: bool = False,
+) -> Tuple[str, str, bool]:
+    """
+    Detect available GPU hardware-accelerated video encoders for FFmpeg.
+    Probes candidates in priority order:
+      1. NVIDIA NVENC (h264_nvenc)
+      2. Intel Quick Sync Video (h264_qsv)
+      3. AMD Advanced Media Framework (h264_amf)
+      4. Apple VideoToolbox (h264_videotoolbox)
+      5. Windows Media Foundation (h264_mf)
+    Gracefully falls back to CPU libx264 if no working hardware encoder is discovered.
+    Returns (encoder_name, description, is_hardware).
+    """
+    global _CACHED_HARDWARE_ENCODER
+    if not force_reprobe and _CACHED_HARDWARE_ENCODER is not None:
+        return _CACHED_HARDWARE_ENCODER
+
+    if not ffmpeg_exe:
+        ffmpeg_exe = find_ffmpeg()
+
+    if not ffmpeg_exe or not (shutil.which(ffmpeg_exe) or Path(ffmpeg_exe).is_file()):
+        return ("libx264", "libx264 (Software CPU)", False)
+
+    candidates = [
+        ("h264_nvenc", ["-preset", "p1", "-cq", "23"], "NVIDIA NVENC (GPU)"),
+        ("h264_qsv", ["-preset", "veryfast", "-global_quality", "23"], "Intel Quick Sync (GPU)"),
+        ("h264_amf", ["-quality", "speed", "-rc", "cqp", "-qp_i", "23", "-qp_p", "23"], "AMD AMF (GPU)"),
+        ("h264_videotoolbox", ["-q:v", "60"], "Apple VideoToolbox (GPU)"),
+        ("h264_mf", ["-b:v", "4000k"], "Windows Media Foundation (GPU/HW)"),
+        ("h264_mediacodec", ["-b:v", "4000k"], "Android MediaCodec (GPU/HW)"),
+        ("h264_vaapi", ["-b:v", "4000k"], "Linux VAAPI (GPU)"),
+    ]
+
+    for enc_name, test_args, desc in candidates:
+        if probe_encoder(ffmpeg_exe, enc_name, test_args):
+            _CACHED_HARDWARE_ENCODER = (enc_name, desc, True)
+            return _CACHED_HARDWARE_ENCODER
+
+    _CACHED_HARDWARE_ENCODER = ("libx264", "libx264 (Software CPU)", False)
+    return _CACHED_HARDWARE_ENCODER
+
+
+def get_video_encoder_args(
+    encoder: Optional[str] = None,
+    preset: Optional[str] = None,
+    ffmpeg_exe: Optional[str] = None,
+    crf: int = 23,
+) -> VideoEncoderInfo:
+    """
+    Resolve FFmpeg video encoder arguments and preset flags.
+    Translates generic presets ('ultrafast', 'veryfast', 'fast', 'medium', 'slow')
+    into encoder-specific options for GPU (NVENC, QSV, AMF, VideoToolbox, MF, MediaCodec, VAAPI) or CPU (libx264).
+    """
+    if not preset:
+        try:
+            from .utils import load_config
+            preset = load_config().get("encoding_preset", "ultrafast")
+        except Exception:
+            preset = "ultrafast"
+
+    preset_clean = str(preset).lower().strip()
+    valid_presets = {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}
+    if preset_clean not in valid_presets:
+        preset_clean = "ultrafast"
+
+    # Normalize encoder selection, consulting config if unassigned
+    if not encoder:
+        try:
+            from .utils import load_config
+            encoder = load_config().get("video_hwaccel", "auto")
+        except Exception:
+            encoder = "auto"
+
+    enc_req = (encoder or "").lower().strip()
+    is_explicit_cpu = enc_req in ("cpu", "software", "libx264")
+
+    if not enc_req or enc_req in ("auto", "gpu", "hardware", "hw"):
+        enc_name, enc_desc, is_hw = detect_hardware_encoder(ffmpeg_exe)
+    elif is_explicit_cpu:
+        enc_name, enc_desc, is_hw = ("libx264", "libx264 (Software CPU)", False)
+    else:
+        # Match explicit encoder aliases
+        if enc_req in ("nvenc", "cuda", "nvidia", "h264_nvenc"):
+            enc_name, enc_desc, is_hw = ("h264_nvenc", "NVIDIA NVENC (GPU)", True)
+        elif enc_req in ("qsv", "intel", "quicksync", "h264_qsv"):
+            enc_name, enc_desc, is_hw = ("h264_qsv", "Intel Quick Sync (GPU)", True)
+        elif enc_req in ("amf", "amd", "radeon", "h264_amf"):
+            enc_name, enc_desc, is_hw = ("h264_amf", "AMD AMF (GPU)", True)
+        elif enc_req in ("videotoolbox", "apple", "vt", "h264_videotoolbox"):
+            enc_name, enc_desc, is_hw = ("h264_videotoolbox", "Apple VideoToolbox (GPU)", True)
+        elif enc_req in ("mf", "mediafoundation", "d3d", "h264_mf"):
+            enc_name, enc_desc, is_hw = ("h264_mf", "Windows Media Foundation (GPU/HW)", True)
+        elif enc_req in ("mediacodec", "android", "h264_mediacodec"):
+            enc_name, enc_desc, is_hw = ("h264_mediacodec", "Android MediaCodec (GPU/HW)", True)
+        elif enc_req in ("vaapi", "linux_vaapi", "h264_vaapi"):
+            enc_name, enc_desc, is_hw = ("h264_vaapi", "Linux VAAPI (GPU)", True)
+        else:
+            enc_name = enc_req
+            enc_desc = f"{enc_name} (Custom)"
+            is_hw = enc_name != "libx264"
+
+    # Map presets and rate control per encoder
+    if enc_name == "h264_nvenc":
+        nvenc_preset_map = {
+            "ultrafast": "p1",
+            "superfast": "p1",
+            "veryfast": "p2",
+            "faster": "p2",
+            "fast": "p3",
+            "medium": "p4",
+            "slow": "p6",
+            "slower": "p6",
+            "veryslow": "p7",
+        }
+        p = nvenc_preset_map.get(preset_clean, "p1")
+        video_args = ["-c:v", "h264_nvenc", "-preset", p, "-cq", str(crf)]
+    elif enc_name == "h264_qsv":
+        qsv_preset_map = {
+            "ultrafast": "veryfast",
+            "superfast": "veryfast",
+            "veryfast": "veryfast",
+            "faster": "faster",
+            "fast": "fast",
+            "medium": "medium",
+            "slow": "slow",
+            "slower": "slower",
+            "veryslow": "veryslow",
+        }
+        p = qsv_preset_map.get(preset_clean, "veryfast")
+        video_args = ["-c:v", "h264_qsv", "-preset", p, "-global_quality", str(crf)]
+    elif enc_name == "h264_amf":
+        amf_quality_map = {
+            "ultrafast": "speed",
+            "superfast": "speed",
+            "veryfast": "speed",
+            "faster": "speed",
+            "fast": "speed",
+            "medium": "balanced",
+            "slow": "quality",
+            "slower": "quality",
+            "veryslow": "quality",
+        }
+        q = amf_quality_map.get(preset_clean, "speed")
+        video_args = ["-c:v", "h264_amf", "-quality", q, "-rc", "cqp", "-qp_i", str(crf), "-qp_p", str(crf)]
+    elif enc_name == "h264_videotoolbox":
+        vt_q_map = {
+            "ultrafast": "55",
+            "superfast": "55",
+            "veryfast": "60",
+            "faster": "60",
+            "fast": "65",
+            "medium": "70",
+            "slow": "75",
+        }
+        q = vt_q_map.get(preset_clean, "60")
+        video_args = ["-c:v", "h264_videotoolbox", "-q:v", q]
+    elif enc_name == "h264_mf":
+        video_args = ["-c:v", "h264_mf", "-b:v", "4000k"]
+    elif enc_name == "h264_mediacodec":
+        video_args = ["-c:v", "h264_mediacodec", "-b:v", "4000k"]
+    elif enc_name == "h264_vaapi":
+        video_args = ["-c:v", "h264_vaapi", "-b:v", "4000k"]
+    else:
+        # Default libx264 CPU encoder
+        video_args = ["-c:v", "libx264", "-preset", preset_clean, "-crf", str(crf)]
+
+    return VideoEncoderInfo(
+        encoder=enc_name,
+        preset=preset_clean,
+        video_args=video_args,
+        description=enc_desc,
+        is_hardware=is_hw,
+    )
+
 
 
 def parse_ffmpeg_time(line: str) -> Optional[float]:
@@ -545,13 +763,120 @@ def convert_text_to_pdf(
     return output_path
 
 
+
+def run_ffmpeg_with_progress(
+    cmd: list[str],
+    total_duration: float,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    pct_start: int = 20,
+    pct_end: int = 90,
+    label: str = "Encoding",
+) -> Tuple[int, list[str]]:
+    """
+    Execute an FFmpeg process with real-time, non-blocking progress streaming via -progress pipe:1.
+    Drains stderr in a background thread to prevent OS pipe deadlocks.
+    Accurately computes elapsed time, ETA, speed multiplier, and framerate.
+    """
+    full_cmd = [cmd[0], "-y", "-progress", "pipe:1", "-nostats"] + cmd[1:]
+    proc = subprocess.Popen(
+        full_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    err_lines: list[str] = []
+
+    def _drain_stderr():
+        if proc.stderr:
+            for l in proc.stderr:
+                err_lines.append(l)
+                if len(err_lines) > 100:
+                    err_lines.pop(0)
+
+    t_err = threading.Thread(target=_drain_stderr, daemon=True)
+    t_err.start()
+
+    speed_str = "1.0x"
+    fps_str = "0"
+    last_pct = -1
+    last_t = 0.0
+
+    try:
+        if progress_callback:
+            tot_disp = time.strftime('%H:%M:%S', time.gmtime(total_duration)) if total_duration > 0 else "--:--:--"
+            progress_callback(pct_start, f"{label}: 00:00:00 / {tot_disp}")
+
+        if proc.stdout:
+            for raw_line in proc.stdout:
+                line = raw_line.strip()
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k == "speed":
+                    s = v.strip()
+                    if s and s != "N/A":
+                        speed_str = s
+                elif k == "fps":
+                    f = v.strip()
+                    if f and f != "N/A":
+                        fps_str = f
+                elif k == "out_time_us":
+                    try:
+                        curr_sec = float(v) / 1_000_000.0
+                        if total_duration > 0:
+                            pct = pct_start + int(min(max(curr_sec / total_duration, 0.0), 1.0) * (pct_end - pct_start))
+                            now = time.time()
+                            if pct != last_pct or (now - last_t) >= 0.3:
+                                last_pct = pct
+                                last_t = now
+                                curr_str = time.strftime('%H:%M:%S', time.gmtime(curr_sec))
+                                tot_str = time.strftime('%H:%M:%S', time.gmtime(total_duration))
+                                eta_str = ""
+                                try:
+                                    spd_f = float(speed_str.rstrip("x")) if speed_str else 0.0
+                                    if spd_f > 0.1 and total_duration > curr_sec:
+                                        eta_sec = int((total_duration - curr_sec) / spd_f)
+                                        eta_str = f", ETA: ~{eta_sec}s" if eta_sec < 60 else f", ETA: ~{eta_sec // 60}m {eta_sec % 60}s"
+                                except Exception:
+                                    pass
+                                if progress_callback:
+                                    progress_callback(pct, f"{label}: {curr_str} / {tot_str} (speed: {speed_str}, {fps_str} fps{eta_str})")
+                    except Exception:
+                        pass
+
+        proc.wait()
+        t_err.join(timeout=1)
+    finally:
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+        if proc.stdout:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+        if proc.stderr:
+            try:
+                proc.stderr.close()
+            except Exception:
+                pass
+
+    return proc.returncode, err_lines
+
+
 def remux_or_transcode_video(
     input_path: str | Path,
     output_path: str | Path,
     reencode: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    preset: Optional[str] = None,
+    hwaccel: Optional[str] = None,
 ) -> Path:
-    """Fast remux (copy stream container) or full re-encode of video."""
+    """Fast remux (copy stream container) or full re-encode of video with GPU acceleration support."""
     ffmpeg_exe = find_ffmpeg()
     if not ffmpeg_exe:
         raise RuntimeError("FFmpeg is required. Please install FFmpeg.")
@@ -560,40 +885,68 @@ def remux_or_transcode_video(
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if reencode:
-        cmd = [
-            ffmpeg_exe, "-y", "-v", "warning",
-            "-i", str(input_path),
-            "-c:v", "libx264", "-crf", "23", "-preset", "medium",
-            "-c:a", "aac", "-b:a", "192k",
-            str(output_path),
-        ]
-    else:
-        cmd = [
-            ffmpeg_exe, "-y", "-v", "warning",
-            "-i", str(input_path),
-            "-c", "copy",
-            str(output_path),
-        ]
-
     total_duration = get_media_duration(input_path)
     if progress_callback:
         progress_callback(10, "Remuxing/Transcoding video...")
 
-    proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
-    if proc.stderr and total_duration > 0:
-        for raw_line in proc.stderr:
-            t = parse_ffmpeg_time(raw_line.strip())
-            if t is not None:
-                pct = int(min(max(t / total_duration, 0.0), 1.0) * 90)
-                if progress_callback:
-                    progress_callback(pct, f"Processing: {pct}%")
+    def _execute_transcode(encoder_args: list[str]) -> Tuple[int, list[str]]:
+        run_cmd = [
+            ffmpeg_exe,
+            "-i", str(input_path),
+            *encoder_args,
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            str(output_path),
+        ]
+        return run_ffmpeg_with_progress(
+            run_cmd,
+            total_duration=total_duration,
+            progress_callback=progress_callback,
+            pct_start=10,
+            pct_end=95,
+            label="Transcoding",
+        )
 
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"Video operation failed with exit code {proc.returncode}")
+    if reencode:
+        enc_info = get_video_encoder_args(encoder=hwaccel, preset=preset, ffmpeg_exe=ffmpeg_exe)
+        retcode, err_lines = _execute_transcode(enc_info.video_args)
+        if retcode != 0 and enc_info.is_hardware:
+            if progress_callback:
+                progress_callback(20, f"Hardware encoder ({enc_info.encoder}) failed. Retrying with CPU libx264...")
+            cpu_info = get_video_encoder_args(encoder="cpu", preset=preset or "ultrafast", ffmpeg_exe=ffmpeg_exe)
+            retcode, err_lines = _execute_transcode(cpu_info.video_args)
 
-    if progress_callback:
+        if retcode != 0:
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                except Exception:
+                    pass
+            err_msg = "".join(err_lines[-3:]).strip() or f"exit code {retcode}"
+            raise RuntimeError(f"Video transcode failed: {err_msg}")
+    else:
+        cmd = [
+            ffmpeg_exe,
+            "-i", str(input_path),
+            "-c", "copy",
+            str(output_path),
+        ]
+        retcode, err_lines = run_ffmpeg_with_progress(
+            cmd,
+            total_duration=total_duration,
+            progress_callback=progress_callback,
+            pct_start=10,
+            pct_end=95,
+            label="Fast remuxing",
+        )
+        if retcode != 0:
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                except Exception:
+                    pass
+            err_msg = "".join(err_lines[-3:]).strip() or f"exit code {retcode}"
+            raise RuntimeError(f"Video remux failed: {err_msg}")
         progress_callback(100, f"Saved: {output_path.name}")
 
     return output_path
@@ -916,6 +1269,7 @@ def are_clips_stream_compatible(clips: list[ClipProbeInfo]) -> Tuple[bool, str]:
 
 def build_normalization_filter(
     clips: list[ClipProbeInfo],
+    resolution: Optional[str] = None,
 ) -> Tuple[str, list[str], list[str]]:
     """
     Build FFmpeg filter_complex script that:
@@ -929,16 +1283,32 @@ def build_normalization_filter(
     if not clips:
         raise ValueError("At least one clip is required to build normalization filter.")
 
+    res_clean = (resolution or "auto").lower().strip()
+
     # 1. Target resolution: choose best clip resolution (max w*h), fallback 1920x1080
-    best_w, best_h = 1920, 1080
+    max_w, max_h = 1920, 1080
     max_pixels = -1
+    vert_count = 0
     for c in clips:
         if c.video and c.video.width > 0 and c.video.height > 0:
+            if c.video.height > c.video.width:
+                vert_count += 1
             pixels = c.video.width * c.video.height
             if pixels > max_pixels:
                 max_pixels = pixels
-                best_w = c.video.width
-                best_h = c.video.height
+                max_w = c.video.width
+                max_h = c.video.height
+
+    is_mostly_vertical = (vert_count > len(clips) / 2) or (max_h > max_w)
+
+    if res_clean in ("1080p", "fhd", "1080"):
+        best_w, best_h = (1080, 1920) if is_mostly_vertical else (1920, 1080)
+    elif res_clean in ("720p", "hd", "720"):
+        best_w, best_h = (720, 1280) if is_mostly_vertical else (1280, 720)
+    elif res_clean in ("4k", "2160p", "uhd"):
+        best_w, best_h = (2160, 3840) if is_mostly_vertical else (3840, 2160)
+    else:
+        best_w, best_h = max_w, max_h
 
     tw = best_w if best_w % 2 == 0 else best_w + 1
     th = best_h if best_h % 2 == 0 else best_h + 1
@@ -1028,11 +1398,14 @@ def verify_video_integrity(
     video_path: str | Path,
     ffmpeg_exe: Optional[str] = None,
     ffprobe_exe: Optional[str] = None,
+    fast: bool = False,
 ) -> bool:
     """
     Run post-merge integrity check on produced video file using ffprobe
-    and FFmpeg null container decoding (ffmpeg -v error -i <output> -f null -)
-    to verify container well-formedness, track decodability, and zero corrupt packets.
+    and FFmpeg null container decoding to verify container well-formedness,
+    track decodability, and zero corrupt packets.
+    When fast=True on videos > 30s, verifies container/stream structures and samples
+    boundary packets (start & end) to prevent long decoding pauses while maintaining corruption detection.
     """
     vp = Path(video_path).resolve()
     if not vp.is_file() or vp.stat().st_size == 0:
@@ -1076,27 +1449,30 @@ def verify_video_integrity(
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Output container metadata corrupted: {e}")
 
-    # 2. FFmpeg null container full decoding verification
+    # 2. FFmpeg null container decoding verification
     if ffmpeg_exe:
-        decode_cmd = [
-            ffmpeg_exe,
-            "-v", "error",
-            "-i", str(vp),
-            "-f", "null",
-            "-",
-        ]
-        try:
-            res = subprocess.run(decode_cmd, capture_output=True, text=True, timeout=timeout)
-            if res.returncode != 0:
-                err = res.stderr.strip() or f"FFmpeg null decode exited with code {res.returncode}"
-                raise RuntimeError(f"Video decodability integrity check failed: {err}")
-            if res.stderr.strip():
-                # FFmpeg error messages under -v error signify corrupted packets or stream decode failures
-                raise RuntimeError(f"Video decodability corruption detected: {res.stderr.strip()}")
-        except FileNotFoundError:
-            pass
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"FFmpeg null decode integrity check timed out after {timeout}s")
+        if fast and dur > 30:
+            cmds_to_run = [
+                ([ffmpeg_exe, "-v", "error", "-threads", "0", "-i", str(vp), "-t", "15", "-f", "null", "-"], 30),
+                ([ffmpeg_exe, "-v", "error", "-threads", "0", "-sseof", "-15", "-i", str(vp), "-f", "null", "-"], 30),
+            ]
+        else:
+            cmds_to_run = [
+                ([ffmpeg_exe, "-v", "error", "-threads", "0", "-i", str(vp), "-f", "null", "-"], timeout),
+            ]
+
+        for decode_cmd, cmd_timeout in cmds_to_run:
+            try:
+                res = subprocess.run(decode_cmd, capture_output=True, text=True, timeout=cmd_timeout)
+                if res.returncode != 0:
+                    err = res.stderr.strip() or f"FFmpeg null decode exited with code {res.returncode}"
+                    raise RuntimeError(f"Video decodability integrity check failed: {err}")
+                if res.stderr.strip():
+                    raise RuntimeError(f"Video decodability corruption detected: {res.stderr.strip()}")
+            except FileNotFoundError:
+                pass
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(f"FFmpeg null decode integrity check timed out after {cmd_timeout}s")
 
     return True
 
@@ -1107,6 +1483,10 @@ def combine_videos(
     reencode: bool = False,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     order: Optional[str] = None,
+    preset: Optional[str] = None,
+    hwaccel: Optional[str] = None,
+    fast_verify: bool = True,
+    resolution: Optional[str] = None,
 ) -> Path:
     """
     Concatenate and merge multiple video files into a single unified video file.
@@ -1114,11 +1494,10 @@ def combine_videos(
     - Direct Stream-Copy Path: If all clips have matching codecs, dimensions, timebase,
       frame rates, and audio properties, uses -f concat demuxer with -c copy -movflags +faststart.
     - Normalization & Transcode Path: If properties differ or direct copy is unsafe,
-      re-encodes to H.264 (libx264) yuv420p, scales and letterboxes/pillarboxes to preserve
-      aspect ratio, harmonizes framerate, synthesizes silent audio for clips lacking audio,
-      and normalizes audio to AAC 48kHz stereo.
-    - Post-Merge Integrity Check: Runs automated ffprobe and null container decoding
-      verification on the output file before reporting completion.
+      re-encodes with GPU hardware acceleration (NVENC, QSV, AMF, VideoToolbox, MF) or ultrafast
+      software CPU (libx264), scales and pads to preserve aspect ratio, harmonizes framerate,
+      synthesizes silent audio if absent, and normalizes audio to AAC 48kHz stereo.
+    - Post-Merge Integrity Check: Runs automated ffprobe and decodability verification.
     """
     ffmpeg_exe = find_ffmpeg()
     if not ffmpeg_exe:
@@ -1148,6 +1527,13 @@ def combine_videos(
     if output_path in valid_paths:
         raise ValueError(f"Output path '{output_path.name}' conflicts with one of the input files.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not resolution:
+        try:
+            from .utils import load_config
+            resolution = load_config().get("merge_resolution", "auto")
+        except Exception:
+            resolution = "auto"
 
     ffprobe_exe = find_ffprobe()
 
@@ -1183,46 +1569,26 @@ def combine_videos(
                     f.write(f"file '{escaped_path}'\n")
 
             copy_cmd = [
-                ffmpeg_exe, "-y", "-v", "warning",
+                ffmpeg_exe,
                 "-f", "concat", "-safe", "0",
                 "-i", str(temp_list_file),
                 "-c", "copy",
                 "-movflags", "+faststart",
                 str(output_path),
             ]
+            copy_rc, error_output = run_ffmpeg_with_progress(
+                copy_cmd,
+                total_duration=total_duration,
+                progress_callback=progress_callback,
+                pct_start=10,
+                pct_end=88,
+                label="Fast stream copying",
+            )
 
-            proc = None
-            try:
-                proc = subprocess.Popen(copy_cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
-                error_output = []
-                if proc.stderr:
-                    for raw_line in proc.stderr:
-                        error_output.append(raw_line)
-                        if total_duration > 0:
-                            t = parse_ffmpeg_time(raw_line.strip())
-                            if t is not None:
-                                pct = int(min(max(t / total_duration, 0.0), 1.0) * 85)
-                                if progress_callback:
-                                    progress_callback(pct, f"Fast stream copying: {pct}%")
-
-                proc.wait()
-            finally:
-                if proc and proc.poll() is None:
-                    try:
-                        proc.kill()
-                        proc.wait(timeout=2)
-                    except Exception:
-                        pass
-                if proc and proc.stderr:
-                    try:
-                        proc.stderr.close()
-                    except Exception:
-                        pass
-
-            if proc.returncode == 0 and output_path.is_file() and output_path.stat().st_size > 0:
+            if copy_rc == 0 and output_path.is_file() and output_path.stat().st_size > 0:
                 # R3: Verify post-merge integrity
                 try:
-                    verify_video_integrity(output_path, ffmpeg_exe=ffmpeg_exe, ffprobe_exe=ffprobe_exe)
+                    verify_video_integrity(output_path, ffmpeg_exe=ffmpeg_exe, ffprobe_exe=ffprobe_exe, fast=fast_verify)
                     if progress_callback:
                         progress_callback(100, f"Combined {len(valid_paths)} videos successfully via direct copy!")
                     return output_path
@@ -1245,11 +1611,17 @@ def combine_videos(
                         pass
 
         # R2: Normalization & Transcode Path
+        enc_info = get_video_encoder_args(
+            encoder=hwaccel,
+            preset=preset,
+            ffmpeg_exe=ffmpeg_exe,
+        )
         if progress_callback:
-            msg = "Streams differ — normalizing & re-encoding video/audio..." if not reencode else "Re-encoding requested — normalizing video/audio..."
+            hw_desc = f" [{enc_info.description}]"
+            msg = f"Re-encoding requested — normalizing video/audio{hw_desc}..." if reencode else f"Streams differ — normalizing & re-encoding video/audio{hw_desc}..."
             progress_callback(20, msg)
 
-        filter_str, map_args, audio_args = build_normalization_filter(probed_clips)
+        filter_str, map_args, audio_args = build_normalization_filter(probed_clips, resolution=resolution)
 
         # Write filter complex to a temporary script file to avoid Windows CLI length limits (>8192 chars)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as f:
@@ -1260,55 +1632,47 @@ def combine_videos(
         for p in valid_paths:
             inputs_args.extend(["-i", str(p)])
 
-        reencode_cmd = [
-            ffmpeg_exe, "-y", "-v", "warning",
-            *inputs_args,
-            "-filter_complex_script", str(temp_script_file),
-            *map_args,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            *audio_args,
-            "-movflags", "+faststart",
-            str(output_path),
-        ]
+        def _run_transcode_pass(encoder_args: list[str]) -> Tuple[int, list[str]]:
+            transcode_cmd = [
+                ffmpeg_exe,
+                *inputs_args,
+                "-filter_complex_script", str(temp_script_file),
+                *map_args,
+                *encoder_args,
+                "-pix_fmt", "yuv420p",
+                *audio_args,
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
+            return run_ffmpeg_with_progress(
+                transcode_cmd,
+                total_duration=total_duration,
+                progress_callback=progress_callback,
+                pct_start=20,
+                pct_end=88,
+                label="Merging & encoding",
+            )
 
-        proc = None
-        try:
-            proc = subprocess.Popen(reencode_cmd, stderr=subprocess.PIPE, text=True, bufsize=1)
-            err_lines = []
-            if proc.stderr:
-                for raw_line in proc.stderr:
-                    err_lines.append(raw_line)
-                    if len(err_lines) > 50:
-                        err_lines.pop(0)
-                    if total_duration > 0:
-                        t = parse_ffmpeg_time(raw_line.strip())
-                        if t is not None:
-                            pct = int(min(max(t / total_duration, 0.0), 1.0) * 85)
-                            if progress_callback:
-                                progress_callback(pct, f"Merging & encoding: {pct}%")
+        retcode, err_lines = _run_transcode_pass(enc_info.video_args)
 
-            proc.wait()
-        finally:
-            if proc and proc.poll() is None:
-                try:
-                    proc.kill()
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
-            if proc and proc.stderr:
-                try:
-                    proc.stderr.close()
-                except Exception:
-                    pass
+        # Automatic fallback: if GPU hardware encoder fails, retry with software CPU libx264
+        if retcode != 0 and enc_info.is_hardware:
+            if progress_callback:
+                progress_callback(22, f"Hardware encoder ({enc_info.encoder}) failed. Retrying with CPU libx264...")
+            cpu_info = get_video_encoder_args(
+                encoder="cpu",
+                preset=preset or "ultrafast",
+                ffmpeg_exe=ffmpeg_exe,
+            )
+            retcode, err_lines = _run_transcode_pass(cpu_info.video_args)
 
-        if proc.returncode != 0:
+        if retcode != 0:
             if output_path.exists():
                 try:
                     output_path.unlink()
                 except Exception:
                     pass
-            err_msg = "".join(err_lines[-5:]).strip() or f"FFmpeg exited with code {proc.returncode}"
+            err_msg = "".join(err_lines[-5:]).strip() or f"FFmpeg exited with code {retcode}"
             raise RuntimeError(f"FFmpeg combine failed: {err_msg}")
 
         # R3: Verify post-merge integrity
@@ -1316,8 +1680,32 @@ def combine_videos(
             progress_callback(90, "Verifying output video integrity...")
 
         try:
-            verify_video_integrity(output_path, ffmpeg_exe=ffmpeg_exe, ffprobe_exe=ffprobe_exe)
+            verify_video_integrity(output_path, ffmpeg_exe=ffmpeg_exe, ffprobe_exe=ffprobe_exe, fast=fast_verify)
         except Exception as e:
+            # If GPU hardware encoder succeeded with exit code 0 but produced a corrupt bitstream,
+            # retry once with clean CPU libx264
+            if enc_info.is_hardware:
+                if progress_callback:
+                    progress_callback(25, f"Hardware encoded stream failed verification ({e}). Retrying with CPU libx264...")
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except Exception:
+                        pass
+                cpu_info = get_video_encoder_args(
+                    encoder="cpu",
+                    preset=preset or "ultrafast",
+                    ffmpeg_exe=ffmpeg_exe,
+                )
+                retcode, err_lines = _run_transcode_pass(cpu_info.video_args)
+                if retcode == 0:
+                    try:
+                        verify_video_integrity(output_path, ffmpeg_exe=ffmpeg_exe, ffprobe_exe=ffprobe_exe, fast=fast_verify)
+                        if progress_callback:
+                            progress_callback(100, f"Combined {len(valid_paths)} videos successfully with CPU fallback!")
+                        return output_path
+                    except Exception as cpu_e:
+                        e = cpu_e
             if output_path.exists():
                 try:
                     output_path.unlink()
@@ -1350,5 +1738,4 @@ def combine_videos(
                 temp_script_file.unlink()
             except Exception:
                 pass
-
 

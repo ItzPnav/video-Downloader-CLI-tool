@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "download_directory": "C:\\pnav\\extra\\others\\projects",
+  "download_directory": "C:\\pnav\\extra\\others\\projects\\combine proj",
   "preferred_format": "bv*+ba/b",
   "merge_format": "mp4",
   "browser_wait_seconds": 8,
@@ -13,6 +13,9 @@
   "spawn_terminals": false,
   "browser_grace_seconds": 2.5,
   "auto_open": false,
+  "video_hwaccel": "auto",
+  "encoding_preset": "fast",
+  "merge_resolution": "auto",
   "github": {
     "repository": "",
     "branch": "main"

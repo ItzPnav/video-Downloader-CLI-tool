@@ -33,6 +33,12 @@ dependencies = [
     "pillow",
 ]
 
+[project.optional-dependencies]
+gui = [
+    "nicegui>=1.4.0",
+    "pywebview>=4.0.0",
+]
+
 [project.scripts]
 tools = "video_downloader.cli:main"
 video = "video_downloader.cli:main"
@@ -42,4 +48,4 @@ where = ["src"]
 include = ["video_downloader*"]
 
 [tool.setuptools.package-data]
-video_downloader = ["*.json", "routes/*.py", "extractors/*.py", "previewer/*", "previewer/css/*", "previewer/js/*"]
+video_downloader = ["*.json", "routes/*.py", "extractors/*.py", "previewer/*", "previewer/css/*", "previewer/js/*", "ui/*"]

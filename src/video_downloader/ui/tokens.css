@@ -1,0 +1,747 @@
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 */
+/* ==========================================================================
+   MISSION CONTROL DESIGN SYSTEM — CSS TOKENS, QUASAR OVERRIDES & ATOMS
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* 1. ROOT DESIGN TOKENS (CYBER TERMINAL DARK) */
+:root {
+  --bg: #0A0D10;
+  --panel: #11161A;
+  --panel-2: #151B20;
+  --line: #232C31;
+  --ink: #E6ECE8;
+  --muted: #6C7E78;
+  --green: #39FF88;
+  --green-dim: #1C7A45;
+  --amber: #FFB627;
+  --amber-dim: #8C640F;
+  --red: #FF5C4D;
+  --grid: rgba(57, 255, 136, 0.05);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-spring: cubic-bezier(0.3, 1.5, 0.5, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-smooth: 300ms;
+}
+
+/* 2. SOLAR LIGHT TOKENS (DESERT OPS) */
+[data-theme="light"],
+.theme-desert-ops {
+  --bg: #EDEDE9;
+  --panel: #F5EBE0;
+  --panel-2: #E3D5CA;
+  --line: #C4B8AD;
+  --ink: #24201D;
+  --muted: #756B62;
+  --green: #2B824E;
+  --green-dim: #4B9B69;
+  --amber: #B8731D;
+  --amber-dim: #8A520B;
+  --red: #C43D2F;
+  --grid: rgba(160, 145, 130, 0.16);
+}
+
+/* 3. ZERO-RADIUS MANDATE & BOX SIZING */
+*,
+*::before,
+*::after,
+.q-btn,
+.q-card,
+.q-field__control,
+.q-field__native,
+.q-menu,
+.q-dialog__inner > div,
+.q-chip,
+.q-badge,
+.q-tab,
+.q-tabs,
+.q-tab-panels,
+.q-tab-panel,
+.q-linear-progress,
+.q-notification {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+/* 4. BASE TYPOGRAPHY & RESPONSIVE CANVAS */
+html,
+body {
+  overflow-x: clip;
+  background:
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 40px 40px,
+    var(--bg) !important;
+  color: var(--ink) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .display-title {
+  font-family: 'Big Shoulders Display', sans-serif !important;
+  font-weight: 800 !important;
+  font-style: normal !important;
+  letter-spacing: 0.02em !important;
+  text-transform: uppercase !important;
+  margin: 0;
+  line-height: 0.98 !important;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+button,
+input,
+textarea,
+select,
+.q-btn .q-btn__content,
+.q-field__native,
+.q-field__prefix,
+.q-field__suffix,
+.q-field__input,
+.q-item__label {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Preserve Material Icons font AND completely replace .q-select__dropdown-icon text with a clean chevron */
+.material-icons,
+.q-icon {
+  font-family: 'Material Icons' !important;
+  font-weight: normal !important;
+  font-style: normal !important;
+  line-height: 1 !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  direction: ltr !important;
+  flex-shrink: 0 !important;
+}
+
+.q-select__dropdown-icon {
+  font-family: 'Material Icons' !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+  width: 18px !important;
+  height: 18px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  flex-shrink: 0 !important;
+  position: relative !important;
+}
+
+.q-select__dropdown-icon::after {
+  content: "▾" !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  color: var(--muted) !important;
+  display: block !important;
+}
+
+/* 5. CRT SCANLINE OVERLAY */
+.scanline {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.012) 0px,
+    rgba(255, 255, 255, 0.012) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  z-index: 99999;
+}
+
+/* 6. KEYFRAME ANIMATIONS */
+@keyframes radarPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 6px var(--green);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.85);
+    box-shadow: 0 0 12px var(--green);
+  }
+}
+
+@keyframes fuelCrawl {
+  0% { background-position: 0 0; }
+  100% { background-position: 16px 0; }
+}
+
+@keyframes taskEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 7. PULSING RADAR EYEBROW */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--amber);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  text-transform: uppercase;
+  font-weight: 600;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.eyebrow::before {
+  content: '';
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: radarPulse 1.8s infinite ease-in-out;
+}
+
+/* 8. PHYSICAL ROCKER SWITCH */
+.rocker-switch {
+  flex-shrink: 0;
+  width: 38px;
+  height: 20px;
+  background: #1A2126;
+  border: 1px solid var(--line);
+  position: relative;
+  cursor: pointer;
+  outline: none;
+  display: inline-block;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+
+.rocker-switch:active {
+  transform: scale(0.94);
+}
+
+.rocker-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--muted);
+  transition: left 0.22s var(--ease-spring),
+              background 0.18s var(--ease-out),
+              box-shadow 0.22s var(--ease-out);
+}
+
+.rocker-switch.active {
+  border-color: var(--green-dim);
+  background: #0F1F16;
+}
+
+.rocker-switch.active::after {
+  left: 20px;
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(57, 255, 136, 0.7);
+}
+
+[data-theme="light"] .rocker-switch {
+  background: #D6CCC2;
+  border-color: #C4B8AD;
+}
+
+[data-theme="light"] .rocker-switch.active {
+  border-color: var(--green);
+  background: #CFE2D4;
+}
+
+/* 9. CRAWLING STRIPED FUEL GAUGE */
+.gauge-block {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 12px 16px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gauge-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  min-width: 0;
+}
+
+.gauge-top .gauge-status-text {
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gauge-top span.val,
+.gauge-top .val {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+
+.gauge-track {
+  height: 10px;
+  background: #1A2126;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  width: 100%;
+}
+
+[data-theme="light"] .gauge-track {
+  background: #D6CCC2;
+}
+
+.gauge-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--green) 0px,
+    var(--green) 6px,
+    var(--green-dim) 6px,
+    var(--green-dim) 8px
+  );
+  background-size: 16px 100%;
+  transition: width var(--duration-smooth) var(--ease-out);
+  animation: fuelCrawl 1.6s linear infinite;
+}
+
+/* 10. TACTICAL PANELS, ROWS & BUTTONS */
+.mc-panel {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+  box-shadow: none !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.mc-panel-elevated {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+  box-shadow: none !important;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.tactical-row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+  animation: taskEnter var(--duration-base) var(--ease-out);
+}
+
+.tactical-row:hover {
+  background: var(--panel-2);
+}
+
+.tactical-row.selected,
+.tactical-row.completed {
+  border-left: 3px solid var(--green) !important;
+  background: rgba(57, 255, 136, 0.05) !important;
+}
+
+.tactical-row.fault {
+  border-left: 3px solid var(--red) !important;
+  background: rgba(255, 92, 77, 0.06) !important;
+}
+
+.tactical-row.active-amber {
+  border-left: 3px solid var(--amber) !important;
+  background: rgba(255, 182, 39, 0.06) !important;
+}
+
+/* High-specificity Tactical Buttons overriding Quasar .bg-primary */
+.q-btn.btn-tactical-primary,
+.q-btn.btn-tactical-primary.bg-primary,
+button.btn-tactical-primary {
+  background: var(--amber) !important;
+  background-color: var(--amber) !important;
+  color: #1A1100 !important;
+  border: 1px solid var(--amber) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.08em !important;
+  padding: 8px 16px !important;
+  min-height: 36px !important;
+  cursor: pointer;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transition: background var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-primary:hover,
+button.btn-tactical-primary:hover {
+  background: #ffc456 !important;
+  background-color: #ffc456 !important;
+  box-shadow: 0 0 8px rgba(255, 182, 39, 0.4) !important;
+}
+
+.q-btn.btn-tactical-primary:active,
+button.btn-tactical-primary:active {
+  transform: scale(0.97) !important;
+}
+
+.q-btn.btn-tactical-secondary,
+.q-btn.btn-tactical-secondary.bg-primary,
+button.btn-tactical-secondary {
+  background: var(--panel-2) !important;
+  background-color: var(--panel-2) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.06em !important;
+  padding: 7px 12px !important;
+  min-height: 36px !important;
+  cursor: pointer;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-secondary:hover,
+button.btn-tactical-secondary:hover {
+  border-color: var(--amber) !important;
+  color: var(--amber) !important;
+}
+
+.q-btn.btn-tactical-secondary:active,
+button.btn-tactical-secondary:active {
+  transform: scale(0.97) !important;
+}
+
+.q-btn.btn-tactical-danger,
+.q-btn.btn-tactical-danger.bg-primary,
+button.btn-tactical-danger {
+  background: rgba(255, 92, 77, 0.12) !important;
+  background-color: rgba(255, 92, 77, 0.12) !important;
+  color: var(--red) !important;
+  border: 1px solid var(--red) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.06em !important;
+  padding: 7px 12px !important;
+  min-height: 36px !important;
+  cursor: pointer;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transition: background var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out) !important;
+}
+
+.q-btn.btn-tactical-danger:hover,
+button.btn-tactical-danger:hover {
+  background: var(--red) !important;
+  background-color: var(--red) !important;
+  color: #0A0D10 !important;
+}
+
+.q-btn.btn-tactical-danger:active,
+button.btn-tactical-danger:active {
+  transform: scale(0.97) !important;
+}
+
+/* Remove Quasar default button hover overlay sheen */
+.q-btn .q-focus-helper {
+  display: none !important;
+}
+
+/* Quasar Input & Select Overrides — Zero Overflow & Clean Floating Labels */
+.mc-input {
+  min-width: 0 !important;
+}
+
+.mc-input .q-field__inner,
+.mc-input .q-field__control,
+.mc-input .q-field__control-container {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.mc-input .q-field__control {
+  background: var(--bg) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+  padding: 0 10px !important;
+  min-height: 46px !important;
+}
+
+.mc-input .q-field__control::before,
+.mc-input .q-field__control::after {
+  display: none !important;
+}
+
+.mc-input.q-field--focused .q-field__control {
+  border-color: var(--amber) !important;
+  box-shadow: 0 0 6px rgba(255, 182, 39, 0.2) !important;
+}
+
+.mc-input .q-field__native,
+.mc-input .q-field__input {
+  color: var(--ink) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding-top: 16px !important;
+  padding-bottom: 4px !important;
+  min-height: 44px !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.mc-input textarea.q-field__native {
+  white-space: pre-wrap !important;
+  padding-top: 20px !important;
+}
+
+.mc-input .q-field__native > span {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: block !important;
+  max-width: 100% !important;
+}
+
+.mc-input .q-field__label {
+  color: var(--muted) !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  top: 6px !important;
+  left: 0 !important;
+  right: 0 !important;
+  transform: none !important;
+  line-height: 1.1 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
+}
+
+.mc-input .q-field__append {
+  padding-left: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+/* Quasar Dropdown Menu Popup Styling */
+.q-menu {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--amber-dim) !important;
+  color: var(--ink) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65) !important;
+}
+
+.q-menu .q-item {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 11px !important;
+  color: var(--ink) !important;
+  min-height: 34px !important;
+  border-left: 3px solid transparent;
+}
+
+.q-menu .q-item--active,
+.q-menu .q-item:hover {
+  background: rgba(57, 255, 136, 0.08) !important;
+  color: var(--green) !important;
+  border-left: 3px solid var(--green) !important;
+}
+
+/* Sector Navigation Responsive Grid & Buttons */
+.sector-nav-grid {
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+
+@media (max-width: 1220px) {
+  .sector-nav-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .sector-nav-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+.sector-nav-btn {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+  padding: 9px 10px;
+  min-width: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+}
+
+.sector-nav-btn:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+.sector-nav-btn:active {
+  transform: scale(0.98);
+}
+
+.sector-nav-btn.active {
+  border-left: 3px solid var(--green) !important;
+  background: rgba(57, 255, 136, 0.07) !important;
+  color: var(--green) !important;
+}
+
+.sector-nav-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  width: 100%;
+}
+
+.sector-nav-sub {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+}
+
+/* Status Badges */
+.mc-badge-green,
+.mc-badge-amber,
+.mc-badge-red,
+.mc-badge-muted {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mc-badge-green {
+  background: rgba(57, 255, 136, 0.12);
+  color: var(--green);
+  border: 1px solid var(--green-dim);
+}
+
+.mc-badge-amber {
+  background: rgba(255, 182, 39, 0.12);
+  color: var(--amber);
+  border: 1px solid var(--amber-dim);
+}
+
+.mc-badge-red {
+  background: rgba(255, 92, 77, 0.12);
+  color: var(--red);
+  border: 1px solid var(--red);
+}
+
+.mc-badge-muted {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+
+/* Technical Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--green-dim);
+  box-shadow: 0 0 4px var(--green);
+}
+
+/* 11. ACCESSIBILITY: REDUCED MOTION */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

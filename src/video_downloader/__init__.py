@@ -40,6 +40,10 @@ _LAZY_EXPORTS = {
     "run_ocr": ".ocr",
     "extract_text_from_image": ".ocr",
     "launch_web_previewer": ".previewer",
+    "launch_mission_control": ".gui",
+    "combine_videos": ".converter",
+    "detect_hardware_encoder": ".converter",
+    "get_video_encoder_args": ".converter",
 }
 
 __all__ = [
@@ -70,12 +74,16 @@ __all__ = [
     "convert_gif_to_mp4",
     "convert_image",
     "convert_text_to_pdf",
+    "combine_videos",
+    "detect_hardware_encoder",
+    "get_video_encoder_args",
     "scrape_and_download_comic",
     "images_to_pdf",
     "images_to_cbz",
     "run_ocr",
     "extract_text_from_image",
     "launch_web_previewer",
+    "launch_mission_control",
 ]
 
 

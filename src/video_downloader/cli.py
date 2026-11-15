@@ -1,3 +1,5 @@
+import re
+import glob
 import sys
 import warnings
 # Suppress non-fatal upstream compatibility warnings on Python 3.14+
@@ -25,6 +27,7 @@ from .utils import (
     write_history,
     safe_filename,
     get_download_dir,
+    get_tool_output_dir,
     get_config_dir,
     ROOT,
 )
@@ -406,7 +409,7 @@ def show_help():
     print('  tools                    Interactive dashboard & navigation menu')
     print('  tools "URL" [options]    Extract and download video / media stream')
     print('  tools convert <file> --to <format> [options]')
-    print('  tools combine <v1> <v2>.. [--out <path>] [--reencode]')
+    print('  tools combine <v1> <v2>.. [--out <path>] [--reencode] [--preset <val>] [--hwaccel <auto|nvenc|qsv|amf|cpu>]')
     print('  tools comic <url_or_file> [options]')
     print('  tools pack <folder> --to <pdf|cbz> [options]')
     print('  tools ocr <image_or_folder> [options]')
@@ -421,6 +424,8 @@ def show_help():
     print("  tools pack <folder>      Bundle image folders into multi-page PDF or CBZ")
     print("  tools ocr <img/folder>   Extract text from images using Tesseract OCR")
     print("  --menu                   Open interactive terminal menu")
+    print("  --web / web              Launch Mission Control 5-Tool Web Console (NiceGUI)")
+    print("  --gui / gui              Launch Mission Control Standalone Desktop Window")
     print("  --help                   Show help")
     print("  --version                Show version")
     print("  --history                Show download history")
@@ -501,6 +506,9 @@ def run_cli_convert(args: list) -> int:
     height = 504
     colors = 256
     custom_out = None
+    reencode = False
+    preset = None
+    hwaccel = None
 
     idx = 1
     while idx < len(args):
@@ -530,6 +538,44 @@ def run_cli_convert(args: list) -> int:
         elif a == "--out" and idx + 1 < len(args):
             custom_out = Path(args[idx + 1])
             idx += 1
+        elif a in ("--reencode", "--re-encode"):
+            reencode = True
+        elif a in ("--preset", "-p") and idx + 1 < len(args):
+            preset = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--preset="):
+            preset = a.split("=", 1)[1].lower()
+        elif a in ("--ultrafast", "--ultra-fast"):
+            preset = "ultrafast"
+        elif a in ("--veryfast", "--very-fast"):
+            preset = "veryfast"
+        elif a in ("--fast",):
+            preset = "fast"
+        elif a in ("--medium",):
+            preset = "medium"
+        elif a in ("--slow",):
+            preset = "slow"
+        elif a in ("--hwaccel", "--encoder", "--accel") and idx + 1 < len(args):
+            hwaccel = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith(("--hwaccel=", "--encoder=", "--accel=")):
+            hwaccel = a.split("=", 1)[1].lower()
+        elif a in ("--gpu", "--hardware"):
+            hwaccel = "gpu"
+        elif a in ("--nvenc", "--cuda"):
+            hwaccel = "nvenc"
+        elif a in ("--qsv", "--quicksync"):
+            hwaccel = "qsv"
+        elif a in ("--amf",):
+            hwaccel = "amf"
+        elif a in ("--videotoolbox", "--vt"):
+            hwaccel = "videotoolbox"
+        elif a in ("--mediacodec",):
+            hwaccel = "mediacodec"
+        elif a in ("--vaapi",):
+            hwaccel = "vaapi"
+        elif a in ("--cpu", "--software", "--no-hwaccel"):
+            hwaccel = "cpu"
         idx += 1
 
     if not target_fmt:
@@ -550,7 +596,7 @@ def run_cli_convert(args: list) -> int:
     print(f"[+] Output : {out_path}")
 
     def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
+        print(f"\r  [{pct:>3}%] {msg:<75}", end="", flush=True)
 
     try:
         in_suffix = input_file.suffix.lower()
@@ -568,7 +614,14 @@ def run_cli_convert(args: list) -> int:
         elif target_fmt in ("png", "jpg", "jpeg", "webp", "bmp", "tiff"):
             convert_image(input_file, out_path, progress_callback=_progress)
         elif target_fmt == "mp4":
-            remux_or_transcode_video(input_file, out_path, progress_callback=_progress)
+            remux_or_transcode_video(
+                input_file,
+                out_path,
+                reencode=reencode,
+                preset=preset,
+                hwaccel=hwaccel,
+                progress_callback=_progress,
+            )
         else:
             print(f"[-] Unsupported conversion: {in_suffix} -> {target_fmt}")
             return 1
@@ -585,13 +638,17 @@ def run_cli_combine(args: list) -> int:
     from .converter import combine_videos
 
     if not args or len(args) < 2:
-        print("[-] Usage: tools combine <video1> <video2> [...] [--out <output.mp4>] [--reencode]")
+        print("[-] Usage: tools combine <video1> <video2> [...] [--out <output.mp4>] [--reencode] [--preset <preset>] [--hwaccel <auto|nvenc|qsv|amf|cpu>]")
         return 1
 
     input_files = []
     custom_out = None
     reencode = False
     order = "ascending"
+    preset = None
+    hwaccel = None
+    fast_verify = True
+    resolution = None
 
     idx = 0
     while idx < len(args):
@@ -612,13 +669,105 @@ def run_cli_combine(args: list) -> int:
             order = "ascending"
         elif a in ("--random", "--shuffle"):
             order = "random"
+        elif a in ("--preset", "-p") and idx + 1 < len(args):
+            preset = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith("--preset="):
+            preset = a.split("=", 1)[1].lower()
+        elif a in ("--ultrafast", "--ultra-fast"):
+            preset = "ultrafast"
+        elif a in ("--veryfast", "--very-fast"):
+            preset = "veryfast"
+        elif a in ("--fast",):
+            preset = "fast"
+        elif a in ("--medium",):
+            preset = "medium"
+        elif a in ("--slow",):
+            preset = "slow"
+        elif a in ("--hwaccel", "--encoder", "--accel") and idx + 1 < len(args):
+            hwaccel = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith(("--hwaccel=", "--encoder=", "--accel=")):
+            hwaccel = a.split("=", 1)[1].lower()
+        elif a in ("--gpu", "--hardware"):
+            hwaccel = "gpu"
+        elif a in ("--nvenc", "--cuda"):
+            hwaccel = "nvenc"
+        elif a in ("--qsv", "--quicksync"):
+            hwaccel = "qsv"
+        elif a in ("--amf",):
+            hwaccel = "amf"
+        elif a in ("--videotoolbox", "--vt"):
+            hwaccel = "videotoolbox"
+        elif a in ("--mediacodec",):
+            hwaccel = "mediacodec"
+        elif a in ("--vaapi",):
+            hwaccel = "vaapi"
+        elif a in ("--cpu", "--software", "--no-hwaccel"):
+            hwaccel = "cpu"
+        elif a in ("--no-fast-verify", "--full-verify"):
+            fast_verify = False
+        elif a in ("--res", "--resolution") and idx + 1 < len(args):
+            resolution = args[idx + 1].lower()
+            idx += 1
+        elif a.startswith(("--res=", "--resolution=")):
+            resolution = a.split("=", 1)[1].lower()
+        elif a in ("--1080p", "--fhd"):
+            resolution = "1080p"
+        elif a in ("--720p", "--hd"):
+            resolution = "720p"
+        elif a in ("--4k", "--uhd"):
+            resolution = "4k" 
         elif not a.startswith("-"):
-            p = Path(a)
-            if not p.is_file():
-                print(f"[-] Video file not found: {a}")
-                return 1
-            input_files.append(p)
+            if "*" in a or "?" in a:
+                import glob
+                from .converter import VIDEO_EXTENSIONS
+                matched = [Path(m) for m in glob.glob(a)]
+                vids = [
+                    m.resolve() for m in matched
+                    if m.is_file() and m.suffix.lower() in VIDEO_EXTENSIONS
+                ]
+                if vids:
+                    input_files.extend(vids)
+                else:
+                    print(f"[-] No video files matched pattern: {a}")
+                    return 1
+            else:
+                p = Path(a)
+                if p.is_dir():
+                    from .converter import VIDEO_EXTENSIONS
+                    folder_vids = [
+                        f.resolve() for f in p.iterdir()
+                        if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+                    ]
+                    if folder_vids:
+                        input_files.extend(folder_vids)
+                    else:
+                        print(f"[-] No video files found in directory: {a}")
+                        return 1
+                elif p.is_file():
+                    input_files.append(p.resolve())
+                else:
+                    print(f"[-] Video file not found: {a}")
+                    return 1
         idx += 1
+
+    # Deduplicate while preserving sequence
+    seen = set()
+    deduped_files = []
+    for f in input_files:
+        if f not in seen:
+            seen.add(f)
+            deduped_files.append(f)
+    input_files = deduped_files
+
+    if order == "ascending":
+        def _nat_key(p: Path):
+            return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", p.name)]
+        input_files = sorted(input_files, key=_nat_key)
+    elif order == "random":
+        import random
+        random.shuffle(input_files)
 
     if len(input_files) < 2:
         print("[-] Please specify at least 2 video files to combine.")
@@ -633,13 +782,30 @@ def run_cli_combine(args: list) -> int:
     print(f"\n[+] Combining {len(input_files)} video clips...")
     for i, f in enumerate(input_files, 1):
         print(f"  {i}. {f.name}")
-    print(f"[+] Output: {custom_out}\n")
+    print(f"[+] Output   : {custom_out}")
+    if hwaccel:
+        print(f"[+] Accel    : {hwaccel}")
+    if preset:
+        print(f"[+] Preset   : {preset}")
+    if resolution:
+        print(f"[+] Res      : {resolution}")
+    print()
 
     def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
+        print(f"\r  [{pct:>3}%] {msg:<75}", end="", flush=True)
 
     try:
-        combine_videos(input_files, custom_out, reencode=reencode, progress_callback=_progress, order=order)
+        combine_videos(
+            input_files,
+            custom_out,
+            reencode=reencode,
+            progress_callback=_progress,
+            order=order,
+            preset=preset,
+            hwaccel=hwaccel,
+            fast_verify=fast_verify,
+            resolution=resolution,
+        )
         print(f"\n[✓] Successfully combined {len(input_files)} videos into: {custom_out}\n")
         return 0
     except Exception as e:
@@ -697,7 +863,7 @@ def run_cli_comic(args: list) -> int:
         print(f"[+] Cookie File: {cookie_file}")
 
     def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
+        print(f"\r  [{pct:>3}%] {msg:<75}", end="", flush=True)
 
     try:
         result_path = scrape_and_download_comic(
@@ -760,7 +926,7 @@ def run_cli_ocr(args: list) -> int:
     print(f"[+] Combined  : {combine_output}")
 
     def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
+        print(f"\r  [{pct:>3}%] {msg:<75}", end="", flush=True)
 
     try:
         ok, out_path, preview = run_ocr(
@@ -780,6 +946,52 @@ def run_cli_ocr(args: list) -> int:
     except Exception as e:
         print(f"\n[-] OCR extraction failed: {e}\n")
         return 1
+
+
+def run_cli_gui(args: list, default_native: bool = False) -> int:
+    """Launch the Mission Control NiceGUI visual frontend (--web / --gui)."""
+    from .gui import launch_mission_control
+
+    native = default_native
+    port = 8080
+    host = "127.0.0.1"
+    open_browser = True
+
+    idx = 0
+    while idx < len(args):
+        a = args[idx]
+        if a in ("--native", "--desktop", "--gui"):
+            native = True
+        elif a in ("--web", "--browser"):
+            native = False
+        elif a in ("--no-open", "--headless"):
+            open_browser = False
+        elif a == "--port" and idx + 1 < len(args):
+            try:
+                port = int(args[idx + 1])
+            except ValueError:
+                print("[-] --port must be a valid integer.")
+                return 1
+            idx += 1
+        elif a.startswith("--port="):
+            try:
+                port = int(a.split("=", 1)[1])
+            except ValueError:
+                print("[-] --port must be a valid integer.")
+                return 1
+        elif a == "--host" and idx + 1 < len(args):
+            host = args[idx + 1]
+            idx += 1
+        elif a.startswith("--host="):
+            host = a.split("=", 1)[1]
+        idx += 1
+
+    return launch_mission_control(
+        native=native,
+        port=port,
+        host=host,
+        open_browser=open_browser,
+    )
 
 
 def run_cli_preview(args: list) -> int:
@@ -846,7 +1058,7 @@ def run_cli_pack(args: list) -> int:
     print(f"[+] Recursive Mode  : {recurse}")
 
     def _progress(pct: int, msg: str):
-        print(f"  [{pct:>3}%] {msg}")
+        print(f"\r  [{pct:>3}%] {msg:<75}", end="", flush=True)
 
     try:
         out_dir = custom_out or get_tool_output_dir("packager")
@@ -953,13 +1165,13 @@ def run_update():
 
 
 
-def main():
+def main(argv=None):
 
     import sys
 
     config = load_config()
 
-    args = sys.argv[1:]
+    args = list(argv) if argv is not None else sys.argv[1:]
 
     # ========================================================
     # NO ARGUMENTS / INTERACTIVE MENU
@@ -1117,6 +1329,16 @@ def main():
         "preview"
     ):
         return run_cli_preview(args[1:])
+
+    # ========================================================
+    # MISSION CONTROL VISUAL UI (--web / --gui / --ui)
+    # ========================================================
+
+    if args[0] in ("--web", "web", "--ui", "ui"):
+        return run_cli_gui(args[1:], default_native=False)
+
+    if args[0] in ("--gui", "gui", "--desktop", "desktop"):
+        return run_cli_gui(args[1:], default_native=True)
 
     # ========================================================
     # PARSE OPTIONS

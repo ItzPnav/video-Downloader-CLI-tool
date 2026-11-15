@@ -1134,6 +1134,473 @@ class TestConverterExtended(unittest.TestCase):
             self.assertEqual(len(rnd), 3)
             self.assertEqual(set(p.name for p in rnd), {"page_1.png", "page_2.png", "page_10.png"})
 
+    def test_detect_hardware_encoder_caching_and_fallback(self):
+        """Test detect_hardware_encoder caching, probing, and CPU fallback."""
+        from unittest.mock import patch
+        from video_downloader.converter import detect_hardware_encoder
+        import video_downloader.converter as conv_mod
+
+        # Reset cache
+        conv_mod._CACHED_HARDWARE_ENCODER = None
+
+        # 1. Fallback to libx264 when probe fails
+        with patch("video_downloader.converter.probe_encoder", return_value=False):
+            name, desc, is_hw = detect_hardware_encoder(ffmpeg_exe="ffmpeg", force_reprobe=True)
+            self.assertEqual(name, "libx264")
+            self.assertFalse(is_hw)
+            self.assertIn("CPU", desc)
+
+        # 2. Caching returns cached value without reprobing
+        with patch("video_downloader.converter.probe_encoder", side_effect=Exception("Should not be called")):
+            name2, desc2, is_hw2 = detect_hardware_encoder(ffmpeg_exe="ffmpeg", force_reprobe=False)
+            self.assertEqual(name2, "libx264")
+
+        # 3. Successful probe detection (e.g. h264_nvenc)
+        def _mock_probe(exe, enc, args):
+            return enc == "h264_nvenc"
+
+        with patch("video_downloader.converter.probe_encoder", side_effect=_mock_probe):
+            name3, desc3, is_hw3 = detect_hardware_encoder(ffmpeg_exe="ffmpeg", force_reprobe=True)
+            self.assertEqual(name3, "h264_nvenc")
+            self.assertTrue(is_hw3)
+            self.assertIn("NVIDIA NVENC", desc3)
+
+    def test_get_video_encoder_args_mappings(self):
+        """Verify preset and rate control translation for NVENC, QSV, AMF, VideoToolbox, and libx264."""
+        from video_downloader.converter import get_video_encoder_args
+
+        # 1. libx264 with ultrafast
+        cpu_ultra = get_video_encoder_args(encoder="cpu", preset="ultrafast")
+        self.assertEqual(cpu_ultra.encoder, "libx264")
+        self.assertFalse(cpu_ultra.is_hardware)
+        self.assertIn("-preset", cpu_ultra.video_args)
+        self.assertIn("ultrafast", cpu_ultra.video_args)
+        self.assertIn("-crf", cpu_ultra.video_args)
+
+        # 2. libx264 with veryfast
+        cpu_veryfast = get_video_encoder_args(encoder="libx264", preset="veryfast")
+        self.assertIn("veryfast", cpu_veryfast.video_args)
+
+        # 3. NVENC mapping: ultrafast maps to p1
+        nvenc_ultra = get_video_encoder_args(encoder="nvenc", preset="ultrafast")
+        self.assertEqual(nvenc_ultra.encoder, "h264_nvenc")
+        self.assertTrue(nvenc_ultra.is_hardware)
+        self.assertIn("-preset", nvenc_ultra.video_args)
+        self.assertIn("p1", nvenc_ultra.video_args)
+        self.assertIn("-cq", nvenc_ultra.video_args)
+
+        # 4. QSV mapping: ultrafast maps to veryfast
+        qsv_ultra = get_video_encoder_args(encoder="qsv", preset="ultrafast")
+        self.assertEqual(qsv_ultra.encoder, "h264_qsv")
+        self.assertIn("-preset", qsv_ultra.video_args)
+        self.assertIn("veryfast", qsv_ultra.video_args)
+        self.assertIn("-global_quality", qsv_ultra.video_args)
+
+        # 5. AMF mapping: ultrafast maps to speed
+        amf_ultra = get_video_encoder_args(encoder="amf", preset="ultrafast")
+        self.assertEqual(amf_ultra.encoder, "h264_amf")
+        self.assertIn("-quality", amf_ultra.video_args)
+        self.assertIn("speed", amf_ultra.video_args)
+
+        # 6. VideoToolbox mapping
+        vt_ultra = get_video_encoder_args(encoder="videotoolbox", preset="ultrafast")
+        self.assertEqual(vt_ultra.encoder, "h264_videotoolbox")
+        self.assertIn("-q:v", vt_ultra.video_args)
+
+        # 7. Media Foundation mapping
+        mf_info = get_video_encoder_args(encoder="mf")
+        self.assertEqual(mf_info.encoder, "h264_mf")
+        self.assertIn("-b:v", mf_info.video_args)
+
+    def test_combine_videos_gpu_acceleration_and_ultrafast_preset(self):
+        """Verify combine_videos properly passes GPU encoder and ultrafast preset to FFmpeg command."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import (
+            combine_videos,
+            ClipProbeInfo,
+            VideoStreamInfo,
+            AudioStreamInfo,
+            VideoEncoderInfo,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v1 = Path(tmp_dir) / "v1.mp4"
+            v2 = Path(tmp_dir) / "v2.mp4"
+            out = Path(tmp_dir) / "merged_nvenc.mp4"
+            v1.write_bytes(b"vid1")
+            v2.write_bytes(b"vid2")
+
+            probed_clips = [
+                ClipProbeInfo(
+                    path=v1,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1920, 1080, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+                ClipProbeInfo(
+                    path=v2,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1280, 720, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+            ]
+
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stderr = []
+
+            def _side_effect(*args, **kwargs):
+                out.write_bytes(b"encoded content")
+                return mock_proc
+
+            gpu_ret = VideoEncoderInfo("h264_nvenc", "ultrafast", ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"], "NVIDIA NVENC (GPU)", True)
+
+            with patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.probe_clip", side_effect=probed_clips), \
+                 patch("video_downloader.converter.verify_video_integrity", return_value=True), \
+                 patch("video_downloader.converter.get_video_encoder_args", return_value=gpu_ret), \
+                 patch("subprocess.Popen") as mock_popen:
+                mock_popen.side_effect = _side_effect
+
+                res = combine_videos([v1, v2], out, preset="ultrafast", hwaccel="nvenc")
+                self.assertEqual(res, out)
+                called_cmd = mock_popen.call_args[0][0]
+                self.assertIn("h264_nvenc", called_cmd)
+                self.assertIn("p1", called_cmd)
+
+    def test_combine_videos_hardware_fallback_to_cpu_on_failure(self):
+        """Verify that if a GPU hardware encoder fails, combine_videos retries seamlessly with CPU libx264."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import (
+            combine_videos,
+            ClipProbeInfo,
+            VideoStreamInfo,
+            AudioStreamInfo,
+            VideoEncoderInfo,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v1 = Path(tmp_dir) / "v1.mp4"
+            v2 = Path(tmp_dir) / "v2.mp4"
+            out = Path(tmp_dir) / "merged_fallback.mp4"
+            v1.write_bytes(b"vid1")
+            v2.write_bytes(b"vid2")
+
+            probed_clips = [
+                ClipProbeInfo(
+                    path=v1,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1920, 1080, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+                ClipProbeInfo(
+                    path=v2,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1280, 720, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+            ]
+
+            fail_proc = MagicMock()
+            fail_proc.returncode = 1
+            fail_proc.stderr = ["NVENC error: device out of memory\n"]
+
+            success_proc = MagicMock()
+            success_proc.returncode = 0
+            success_proc.stderr = []
+
+            call_count = [0]
+            def _side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    return fail_proc
+                out.write_bytes(b"cpu fallback content")
+                return success_proc
+
+            gpu_info = VideoEncoderInfo("h264_nvenc", "ultrafast", ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"], "NVIDIA NVENC (GPU)", True)
+            cpu_info = VideoEncoderInfo("libx264", "ultrafast", ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"], "libx264 (Software CPU)", False)
+
+            def _mock_get_encoder(encoder=None, preset=None, ffmpeg_exe=None, crf=23):
+                if encoder == "cpu":
+                    return cpu_info
+                return gpu_info
+
+            progress_log = []
+            def _progress(pct, msg):
+                progress_log.append(msg)
+
+            with patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.probe_clip", side_effect=probed_clips), \
+                 patch("video_downloader.converter.verify_video_integrity", return_value=True), \
+                 patch("video_downloader.converter.get_video_encoder_args", side_effect=_mock_get_encoder), \
+                 patch("subprocess.Popen") as mock_popen:
+                mock_popen.side_effect = _side_effect
+
+                res = combine_videos([v1, v2], out, progress_callback=_progress, hwaccel="nvenc")
+                self.assertEqual(res, out)
+                self.assertEqual(mock_popen.call_count, 2)
+                self.assertTrue(any("Retrying with CPU" in msg for msg in progress_log))
+
+    def test_verify_video_integrity_fast_sampling(self):
+        """Test verify_video_integrity with fast=True sampling boundary packets for long clips."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import verify_video_integrity
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_file = Path(tmp_dir) / "sample_long.mp4"
+            test_file.write_bytes(b"fake long video content")
+
+            probe_data = json.dumps({
+                "streams": [
+                    {"index": 0, "codec_type": "video", "codec_name": "h264"},
+                    {"index": 1, "codec_type": "audio", "codec_name": "aac"},
+                ],
+                "format": {"duration": "120.0"}
+            })
+
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = probe_data
+            mock_res.stderr = ""
+
+            cmds_called = []
+            def _mock_run(cmd, *args, **kwargs):
+                cmds_called.append(cmd)
+                return mock_res
+
+            with patch("video_downloader.converter.find_ffprobe", return_value="ffprobe"), \
+                 patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.get_media_duration", return_value=120.0), \
+                 patch("subprocess.run", side_effect=_mock_run):
+                ok = verify_video_integrity(test_file, fast=True)
+                self.assertTrue(ok)
+                flat_cmds = [" ".join(c) if isinstance(c, list) else str(c) for c in cmds_called]
+                self.assertTrue(any("-t 15" in c for c in flat_cmds))
+                self.assertTrue(any("-sseof -15" in c for c in flat_cmds))
+
+    def test_run_cli_combine_preset_and_hwaccel_arguments(self):
+        """Verify run_cli_combine parses --preset and --hwaccel / --gpu CLI options."""
+        from unittest.mock import patch
+        from video_downloader.cli import run_cli_combine
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v1 = Path(tmp_dir) / "v1.mp4"
+            v2 = Path(tmp_dir) / "v2.mp4"
+            out = Path(tmp_dir) / "out.mp4"
+            v1.write_bytes(b"clip1")
+            v2.write_bytes(b"clip2")
+
+            with patch("video_downloader.converter.combine_videos") as mock_combine:
+                code = run_cli_combine([
+                    str(v1), str(v2),
+                    "--out", str(out),
+                    "--preset", "ultrafast",
+                    "--gpu",
+                    "--reencode",
+                ])
+                self.assertEqual(code, 0)
+                mock_combine.assert_called_once()
+                kwargs = mock_combine.call_args.kwargs
+                self.assertEqual(kwargs.get("preset"), "ultrafast")
+                self.assertEqual(kwargs.get("hwaccel"), "gpu")
+                self.assertTrue(kwargs.get("reencode"))
+
+    def test_get_video_encoder_args_respects_config_cpu_hwaccel(self):
+        """Verify that if encoder is None, get_video_encoder_args reads video_hwaccel: cpu from config."""
+        from unittest.mock import patch
+        from video_downloader.converter import get_video_encoder_args
+
+        with patch("video_downloader.utils.load_config", return_value={"video_hwaccel": "cpu", "encoding_preset": "ultrafast"}):
+            info = get_video_encoder_args(encoder=None)
+            self.assertEqual(info.encoder, "libx264")
+            self.assertFalse(info.is_hardware)
+            self.assertEqual(info.preset, "ultrafast")
+
+    def test_get_video_encoder_args_mediacodec_and_vaapi(self):
+        """Verify that MediaCodec and VAAPI encoders are properly resolved and mapped."""
+        from video_downloader.converter import get_video_encoder_args
+
+        mc_info = get_video_encoder_args(encoder="mediacodec")
+        self.assertEqual(mc_info.encoder, "h264_mediacodec")
+        self.assertTrue(mc_info.is_hardware)
+        self.assertIn("h264_mediacodec", mc_info.video_args)
+
+        vaapi_info = get_video_encoder_args(encoder="vaapi")
+        self.assertEqual(vaapi_info.encoder, "h264_vaapi")
+        self.assertTrue(vaapi_info.is_hardware)
+        self.assertIn("h264_vaapi", vaapi_info.video_args)
+
+    def test_combine_videos_gpu_integrity_failure_falls_back_to_cpu(self):
+        """Verify that if GPU encoding exits code 0 but fails integrity verification, combine_videos retries with CPU libx264."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import (
+            combine_videos,
+            ClipProbeInfo,
+            VideoStreamInfo,
+            AudioStreamInfo,
+            VideoEncoderInfo,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v1 = Path(tmp_dir) / "v1.mp4"
+            v2 = Path(tmp_dir) / "v2.mp4"
+            out = Path(tmp_dir) / "merged_integ_fallback.mp4"
+            v1.write_bytes(b"vid1")
+            v2.write_bytes(b"vid2")
+
+            probed_clips = [
+                ClipProbeInfo(
+                    path=v1,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1920, 1080, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+                ClipProbeInfo(
+                    path=v2,
+                    duration=5.0,
+                    video=VideoStreamInfo("h264", 1280, 720, "yuv420p", "30/1", "30/1", "1/30"),
+                    audio=AudioStreamInfo("aac", 2, 48000),
+                ),
+            ]
+
+            success_proc = MagicMock()
+            success_proc.returncode = 0
+            success_proc.stderr = []
+
+            def _side_effect(*args, **kwargs):
+                out.write_bytes(b"content")
+                return success_proc
+
+            gpu_info = VideoEncoderInfo("h264_nvenc", "ultrafast", ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"], "NVIDIA NVENC (GPU)", True)
+            cpu_info = VideoEncoderInfo("libx264", "ultrafast", ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"], "libx264 (Software CPU)", False)
+
+            def _mock_get_encoder(encoder=None, preset=None, ffmpeg_exe=None, crf=23):
+                if encoder == "cpu":
+                    return cpu_info
+                return gpu_info
+
+            # First integrity check (on GPU output) fails; second (on CPU output) succeeds
+            integ_attempts = [0]
+            def _mock_verify(*args, **kwargs):
+                integ_attempts[0] += 1
+                if integ_attempts[0] == 1:
+                    raise RuntimeError("GPU bitstream corrupt packet headers detected")
+                return True
+
+            progress_log = []
+            def _progress(pct, msg):
+                progress_log.append(msg)
+
+            with patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.probe_clip", side_effect=probed_clips), \
+                 patch("video_downloader.converter.verify_video_integrity", side_effect=_mock_verify), \
+                 patch("video_downloader.converter.get_video_encoder_args", side_effect=_mock_get_encoder), \
+                 patch("subprocess.Popen", side_effect=_side_effect) as mock_popen:
+
+                res = combine_videos([v1, v2], out, progress_callback=_progress, hwaccel="nvenc")
+                self.assertEqual(res, out)
+                self.assertEqual(mock_popen.call_count, 2)
+                self.assertTrue(any("failed verification" in msg for msg in progress_log))
+
+    def test_remux_or_transcode_video_reencode_gpu_and_cpu_fallback(self):
+        """Verify that remux_or_transcode_video with reencode=True automatically falls back to CPU libx264 if GPU encoder fails."""
+        from unittest.mock import patch, MagicMock
+        from video_downloader.converter import remux_or_transcode_video, VideoEncoderInfo
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            src = Path(tmp_dir) / "source.mkv"
+            dest = Path(tmp_dir) / "dest.mp4"
+            src.write_bytes(b"source content")
+
+            gpu_info = VideoEncoderInfo("h264_nvenc", "ultrafast", ["-c:v", "h264_nvenc", "-preset", "p1", "-cq", "23"], "NVIDIA NVENC (GPU)", True)
+            cpu_info = VideoEncoderInfo("libx264", "ultrafast", ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"], "libx264 (Software CPU)", False)
+
+            fail_proc = MagicMock()
+            fail_proc.returncode = 1
+            fail_proc.stderr = ["CUDA driver error\n"]
+
+            ok_proc = MagicMock()
+            ok_proc.returncode = 0
+            ok_proc.stderr = []
+
+            call_count = [0]
+            def _side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    return fail_proc
+                dest.write_bytes(b"cpu encoded")
+                return ok_proc
+
+            def _mock_get_encoder(encoder=None, preset=None, ffmpeg_exe=None, crf=23):
+                if encoder == "cpu":
+                    return cpu_info
+                return gpu_info
+
+            progress_log = []
+            def _progress(pct, msg):
+                progress_log.append(msg)
+
+            with patch("video_downloader.converter.find_ffmpeg", return_value="ffmpeg"), \
+                 patch("video_downloader.converter.get_media_duration", return_value=10.0), \
+                 patch("video_downloader.converter.get_video_encoder_args", side_effect=_mock_get_encoder), \
+                 patch("subprocess.Popen", side_effect=_side_effect) as mock_popen:
+
+                res = remux_or_transcode_video(src, dest, reencode=True, hwaccel="nvenc", progress_callback=_progress)
+                self.assertEqual(res, dest)
+                self.assertEqual(mock_popen.call_count, 2)
+                self.assertTrue(any("Retrying with CPU" in msg for msg in progress_log))
+
+    def test_run_cli_convert_preset_and_hwaccel_arguments(self):
+        """Verify run_cli_convert parses --reencode, --preset, and --gpu options."""
+        from unittest.mock import patch
+        from video_downloader.cli import run_cli_convert
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            src = Path(tmp_dir) / "input.mov"
+            out = Path(tmp_dir) / "output.mp4"
+            src.write_bytes(b"sample mov")
+
+            with patch("video_downloader.converter.remux_or_transcode_video") as mock_remux:
+                code = run_cli_convert([
+                    str(src),
+                    "--to", "mp4",
+                    "--out", str(out),
+                    "--reencode",
+                    "--preset", "ultrafast",
+                    "--gpu",
+                ])
+                self.assertEqual(code, 0)
+                mock_remux.assert_called_once()
+                kwargs = mock_remux.call_args.kwargs
+                self.assertTrue(kwargs.get("reencode"))
+                self.assertEqual(kwargs.get("preset"), "ultrafast")
+                self.assertEqual(kwargs.get("hwaccel"), "gpu")
+
+    def test_run_cli_combine_explicit_encoder_flags(self):
+        """Verify run_cli_combine parses explicit encoder flags like --nvenc, --qsv, --amf, and presets --medium, --slow."""
+        from unittest.mock import patch
+        from video_downloader.cli import run_cli_combine
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v1 = Path(tmp_dir) / "v1.mp4"
+            v2 = Path(tmp_dir) / "v2.mp4"
+            out = Path(tmp_dir) / "out.mp4"
+            v1.write_bytes(b"clip1")
+            v2.write_bytes(b"clip2")
+
+            with patch("video_downloader.converter.combine_videos") as mock_combine:
+                code = run_cli_combine([
+                    str(v1), str(v2),
+                    "--out", str(out),
+                    "--nvenc",
+                    "--medium",
+                ])
+                self.assertEqual(code, 0)
+                kwargs = mock_combine.call_args.kwargs
+                self.assertEqual(kwargs.get("hwaccel"), "nvenc")
+                self.assertEqual(kwargs.get("preset"), "medium")
+
+
 if __name__ == "__main__":
     unittest.main()
 

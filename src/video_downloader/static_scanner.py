@@ -42,9 +42,10 @@ class StaticScanner:
         "data-manifest",
     )
 
-    def __init__(self, url):
+    def __init__(self, url, requested_quality=None):
 
         self.url = url
+        self.requested_quality = requested_quality
         self.candidates = []
         self.seen = set()
 
@@ -334,7 +335,25 @@ class StaticScanner:
 
                 score_candidate(candidate)
 
-    def scan(self):
+    def scan(self, requested_quality=None):
+
+        quality = requested_quality if requested_quality is not None else self.requested_quality
+
+        try:
+            from .extractors.twitter import is_twitter_url, extract_twitter_candidate
+        except (ImportError, ValueError):
+            from video_downloader.extractors.twitter import is_twitter_url, extract_twitter_candidate
+
+        if is_twitter_url(self.url):
+            print("[+] Static scanner: probing X/Twitter syndication & fxtwitter APIs...")
+            tw_candidate = extract_twitter_candidate(
+                self.url,
+                requested_quality=quality,
+                include_ytdlp=False,
+            )
+            if tw_candidate:
+                self.candidates.append(tw_candidate)
+                return [tw_candidate]
 
         html, base_url = self.fetch()
 

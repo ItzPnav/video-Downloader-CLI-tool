@@ -1706,10 +1706,13 @@ def action_combine_videos(config: dict):
 
                 def _progress(pct: int, msg: str):
                     bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-                    sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+                    sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg:<75}")
                     sys.stdout.flush()
 
                 try:
+                    hwaccel_cfg = config.get("video_hwaccel", "auto")
+                    preset_cfg = config.get("encoding_preset", "ultrafast")
+                    res_cfg = config.get("merge_resolution", "auto")
                     print(f"[+] Starting video combine...")
                     result = combine_videos(
                         video_paths=selected_videos,
@@ -1717,6 +1720,10 @@ def action_combine_videos(config: dict):
                         reencode=False,
                         progress_callback=_progress,
                         order=order_choice,
+                        preset=preset_cfg,
+                        hwaccel=hwaccel_cfg,
+                        fast_verify=True,
+                        resolution=res_cfg,
                     )
                     print(f"\n\n{FG_GREEN}[✓] Videos merged successfully!{RESET}")
                     print(f"    Saved to: {result}")
@@ -1874,7 +1881,7 @@ def _run_comic_scrape_flow(config: dict, source: str):
 
     def _progress(pct: int, msg: str):
         bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg:<75}")
         sys.stdout.flush()
 
     try:
@@ -1939,7 +1946,7 @@ def _run_pack_images_flow(config: dict):
 
     def _progress(pct: int, msg: str):
         bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg:<75}")
         sys.stdout.flush()
 
     try:
@@ -2059,7 +2066,7 @@ def _run_ocr_flow(config: dict):
 
     def _progress(pct: int, msg: str):
         bar = f"{FG_CYAN}{'━' * (pct // 4)}{RESET}{DIM}{'━' * (25 - (pct // 4))}{RESET}"
-        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg}")
+        sys.stdout.write(f"\r  [{bar}] {pct:>3}% — {msg:<75}")
         sys.stdout.flush()
 
     try:
@@ -2354,6 +2361,9 @@ def action_settings(config: dict):
         merge_fmt = config.get("merge_format", "mp4")
         confidence = config.get("confidence_threshold", 50)
         auto_open = config.get("auto_open", True)
+        hwaccel = config.get("video_hwaccel", "auto")
+        preset = config.get("encoding_preset", "ultrafast")
+        resolution = config.get("merge_resolution", "auto")
 
         def badge(val: bool) -> str:
             return f"{BG_CYAN}{FG_BLACK} ON {RESET}" if val else f"{BG_GRAY}{FG_WHITE} OFF {RESET}"
@@ -2378,6 +2388,9 @@ def action_settings(config: dict):
             ("Browser Tier Grace Timer", f"{FG_YELLOW}{grace}s{RESET}", "Delay before starting heavy headless browser"),
             ("Confidence Threshold", f"{FG_YELLOW}{confidence}{RESET}", "Minimum candidate score required to win"),
             ("Separate Terminal Windows", badge(terminals_on), "Spawn physical terminal windows vs single-terminal"),
+            ("GPU Hardware Acceleration", f"{FG_YELLOW}{hwaccel.upper()}{RESET}", "Hardware encoding: auto (NVENC/QSV/AMF), gpu, or cpu"),
+            ("Video Encoding Preset", f"{FG_YELLOW}{preset.upper()}{RESET}", "Encoding speed: ultrafast, veryfast, fast, medium"),
+            ("Combine Target Resolution", f"{FG_YELLOW}{resolution.upper()}{RESET}", "Normalization scale: auto, 1080p, 720p, or 4k"),
             ("Tier 1: yt-dlp Native Agent", badge(ytdlp_on), "Fast direct extractor & format selector"),
             ("Tier 2: Scrapling Adaptive Agent", badge(scrapling_on), "Intelligent HTTP & stealth DOM scanner"),
             ("Tier 3: Static HTML Scanner Agent", badge(static_on), "BeautifulSoup & regex stream matcher"),
@@ -2404,7 +2417,11 @@ def action_settings(config: dict):
             selected_idx = (selected_idx - 1) % len(items)
         elif key == "DOWN":
             selected_idx = (selected_idx + 1) % len(items)
-        elif key in ("ENTER", "SPACE"):
+        elif key in ("1", "2", "3", "4", "5", "6", "7", "8", "9") and int(key) <= len(items) - 1:
+            selected_idx = int(key) - 1
+            key = "ENTER"
+
+        if key in ("ENTER", "SPACE"):
             if selected_idx == 0:
                 config["auto_open"] = not auto_open
                 save_config(config)
@@ -2454,18 +2471,33 @@ def action_settings(config: dict):
                 config["spawn_terminals"] = not terminals_on
                 save_config(config)
             elif selected_idx == 7:
-                config["use_ytdlp"] = not ytdlp_on
+                hwaccel_cycle = ["auto", "gpu", "cpu"]
+                curr_idx = hwaccel_cycle.index(hwaccel) if hwaccel in hwaccel_cycle else 0
+                config["video_hwaccel"] = hwaccel_cycle[(curr_idx + 1) % len(hwaccel_cycle)]
                 save_config(config)
             elif selected_idx == 8:
-                config["use_scrapling"] = not scrapling_on
+                preset_cycle = ["ultrafast", "veryfast", "fast", "medium"]
+                curr_p_idx = preset_cycle.index(preset) if preset in preset_cycle else 0
+                config["encoding_preset"] = preset_cycle[(curr_p_idx + 1) % len(preset_cycle)]
                 save_config(config)
             elif selected_idx == 9:
-                config["use_static_scanner"] = not static_on
+                res_cycle = ["auto", "1080p", "720p", "4k"]
+                curr_r_idx = res_cycle.index(resolution) if resolution in res_cycle else 0
+                config["merge_resolution"] = res_cycle[(curr_r_idx + 1) % len(res_cycle)]
                 save_config(config)
             elif selected_idx == 10:
-                config["use_browser"] = not browser_on
+                config["use_ytdlp"] = not ytdlp_on
                 save_config(config)
             elif selected_idx == 11:
+                config["use_scrapling"] = not scrapling_on
+                save_config(config)
+            elif selected_idx == 12:
+                config["use_static_scanner"] = not static_on
+                save_config(config)
+            elif selected_idx == 13:
+                config["use_browser"] = not browser_on
+                save_config(config)
+            elif selected_idx == 14:
                 break
 
         elif key in ("ESC", "q", "Q", "0"):
@@ -2655,6 +2687,7 @@ def run_interactive_menu() -> int:
         ("🎬", "Video Tools", "Download video stream, play, combine clips, directory, cleanup"),
         ("🧰", "Other Tools & Utilities", "Media converter, comic scraper, PDF packager, OCR"),
         ("⚙", "Settings & Preferences", "Manage per-tool output directories, engine options, history"),
+        ("🖥", "Mission Control UI (Web / Desktop)", "Launch 5-tool tactical visual console via NiceGUI"),
         ("🚪", "Exit", "Close Tool-Kit CLI"),
     ]
 
@@ -2709,7 +2742,35 @@ def run_interactive_menu() -> int:
                     action_other_tools(config)
                 elif num == 2:
                     action_settings_and_cleanup(config)
+            elif key in ("4", "w", "W"):
+                selected_index = 3
+                show_cursor()
+                from .gui import launch_mission_control
+                launch_mission_control(native=False)
+                hide_cursor()
+            elif key in ("g", "G"):
+                selected_index = 3
+                show_cursor()
+                from .gui import launch_mission_control
+                launch_mission_control(native=True)
+                hide_cursor()
             elif key == "0":
+                break
+            elif key == "ENTER":
+                if selected_index == 0:
+                    action_video_tools(config)
+                elif selected_index == 1:
+                    action_other_tools(config)
+                elif selected_index == 2:
+                    action_settings_and_cleanup(config)
+                elif selected_index == 3:
+                    show_cursor()
+                    from .gui import launch_mission_control
+                    launch_mission_control(native=False)
+                    hide_cursor()
+                elif selected_index == 4:
+                    break
+            elif key == "__UNUSED__":
                 break
             elif key == "ENTER":
                 if selected_index == 0:

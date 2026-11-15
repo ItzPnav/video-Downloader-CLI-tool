@@ -5,6 +5,7 @@ from .routes import RouteRegistry
 
 from .routes import (
     youtube,
+    twitter,
     tnaflix,
     vimeo,
     dailymotion,
@@ -34,6 +35,15 @@ def register_routes():
             "youtube",
             youtube.matches,
             youtube.media_type,
+        )
+    )
+
+    registry.register(
+        RouteRegistryRoute(
+            "Twitter",
+            "twitter",
+            twitter.matches,
+            twitter.media_type,
         )
     )
 

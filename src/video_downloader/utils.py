@@ -30,6 +30,9 @@ DEFAULT_CONFIG = {
     "spawn_terminals": False,
     "browser_grace_seconds": 2.5,
     "auto_open": True,
+    "video_hwaccel": "auto",
+    "encoding_preset": "ultrafast",
+    "merge_resolution": "auto",
     "github": {
         "repository": "ItzPnav/video-Downloader-CLI-tool",
         "branch": "main"

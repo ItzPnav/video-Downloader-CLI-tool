@@ -40,16 +40,26 @@ def run_ytdlp_agent(url: str, requested_quality: Optional[str] = None) -> Option
     """Run yt-dlp native extraction tier."""
     try:
         from .site_extractor import available, extract_info, choose_format
+        from .extractors.twitter import is_twitter_url, extract_twitter_candidate
     except (ImportError, ValueError):
         from video_downloader.site_extractor import available, extract_info, choose_format
+        from video_downloader.extractors.twitter import is_twitter_url, extract_twitter_candidate
 
     if not available():
         print("[-] [yt-dlp] yt-dlp binary is not available.")
+        if is_twitter_url(url):
+            return extract_twitter_candidate(url, requested_quality=requested_quality, include_ytdlp=True)
         return None
 
     print(f"[+] [yt-dlp] Extracting info for: {url}")
     info = extract_info(url)
     if not info:
+        if is_twitter_url(url):
+            print("[!] [yt-dlp] Falling back to Twitter API extractor...")
+            cand = extract_twitter_candidate(url, requested_quality=requested_quality, include_ytdlp=True)
+            if cand:
+                print(f"[✓] [yt-dlp] Resolved Twitter media via {cand.source}")
+                return cand
         print("[!] [yt-dlp] Could not extract media info.")
         return None
 
@@ -73,7 +83,7 @@ def run_ytdlp_agent(url: str, requested_quality: Optional[str] = None) -> Option
     return candidate
 
 
-def run_static_agent(url: str) -> Optional[Candidate]:
+def run_static_agent(url: str, requested_quality: Optional[str] = None) -> Optional[Candidate]:
     """Run static HTML scanner (BeautifulSoup) tier."""
     try:
         from .static_scanner import StaticScanner
@@ -81,8 +91,8 @@ def run_static_agent(url: str) -> Optional[Candidate]:
         from video_downloader.static_scanner import StaticScanner
 
     print(f"[+] [static] Scanning HTML DOM: {url}")
-    scanner = StaticScanner(url)
-    candidates = scanner.scan()
+    scanner = StaticScanner(url, requested_quality=requested_quality)
+    candidates = scanner.scan(requested_quality=requested_quality)
     best = choose(candidates)
     if best:
         print(f"[✓] [static] Found media candidate: {best.url} (score={best.score})")
@@ -137,7 +147,7 @@ def run_tier_agent(tier: str, url: str, requested_quality: Optional[str] = None)
     if tier_lower in ("ytdlp", "yt-dlp", "site"):
         return run_ytdlp_agent(url, requested_quality)
     elif tier_lower in ("static", "static_scanner"):
-        return run_static_agent(url)
+        return run_static_agent(url, requested_quality)
     elif tier_lower in ("browser", "selenium"):
         return run_browser_agent(url)
     elif tier_lower in ("scrapling", "scrapling_scanner"):

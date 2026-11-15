@@ -22,7 +22,7 @@ import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Callable, Dict, List, Optional, TypedDict
 
 # Suppress non-fatal upstream compatibility warnings on Python 3.14+
 warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
@@ -105,9 +105,11 @@ class ExtractionRaceController:
         no_scrapling: bool = False,
         prefer_gui: Optional[bool] = None,
         browser_grace_seconds: Optional[float] = None,
+        on_event: Optional[Callable[[dict[str, Any]], None]] = None,
     ):
         self.url = url
         self.requested_quality = requested_quality
+        self.on_event = on_event
         self.config = load_config()
 
         self.timeout = float(
@@ -168,6 +170,20 @@ class ExtractionRaceController:
         self.killed_pids: list[int] = []
         self._start_time: float = 0.0
 
+    def _emit(self, event_type: str, **payload: Any) -> None:
+        """Emit structured race telemetry event to optional callback listener."""
+        if not self.on_event:
+            return
+        try:
+            elapsed_ms = int((time.time() - self._start_time) * 1000) if self._start_time else 0
+            self.on_event({
+                "type": event_type,
+                "elapsed_ms": elapsed_ms,
+                **payload,
+            })
+        except Exception:
+            pass
+
     def _spawn_single_tier(self, tier: str) -> LaunchedProcess:
         """Spawn worker process for a single tier."""
         python_exe = sys.executable
@@ -210,6 +226,7 @@ class ExtractionRaceController:
         self.spawned_pids[tier] = proc.pid
         if self.prefer_gui:
             print(f"[+] Spawning agent [{tier}] (PID: {proc.pid})...")
+        self._emit("tier_spawned", tier=tier, pid=proc.pid)
         return proc
 
     def _spawn_all_tiers(self) -> None:
@@ -257,12 +274,20 @@ class ExtractionRaceController:
                         if data.get("success") and data.get("candidate"):
                             cand = dict_to_candidate(data["candidate"])
                             tier_statuses[tier] = f"score {cand.score}"
+                            self._emit(
+                                "tier_result",
+                                tier=tier,
+                                success=True,
+                                score=cand.score,
+                                label=cand.label,
+                            )
                             if cand.score >= self.confidence_threshold:
                                 winner_tier = tier
                                 winning_candidate = cand
                                 break
                         else:
                             tier_statuses[tier] = "no media"
+                            self._emit("tier_result", tier=tier, success=False, score=0)
                     except Exception:
                         pass
 
@@ -286,6 +311,13 @@ class ExtractionRaceController:
                             print(f"[+] Grace timer elapsed ({self.browser_grace_seconds:.1f}s) — releasing browser agent...")
                     self._spawn_single_tier("browser")
                     tier_statuses["browser"] = "running"
+                    self._emit("tier_escalated", tier="browser")
+
+            self._emit(
+                "tier_tick",
+                statuses=dict(tier_statuses),
+                pids=dict(self.spawned_pids),
+            )
 
             # Check if all processes completed without winner
             all_exited = True
@@ -344,6 +376,7 @@ class ExtractionRaceController:
                     if self.prefer_gui:
                         print(f"[✓] Successfully killed PID: {target_pid}")
                     self.killed_pids.append(target_pid)
+                    self._emit("tier_killed", tier=tier, pid=target_pid)
                 else:
                     # Cleanly reap the winning process
                     handle.reap(timeout=1.0)
@@ -358,6 +391,7 @@ class ExtractionRaceController:
                 if self.prefer_gui:
                     print(f"[✓] Killed PID: {target_pid} ({tier})")
                 self.killed_pids.append(target_pid)
+                self._emit("tier_killed", tier=tier, pid=target_pid)
         else:
             # Reaping processes if all finished with failure
             for handle in self.launched_processes.values():
@@ -437,6 +471,15 @@ class ExtractionRaceController:
             return RaceResult(None, None, 0, {}, [], timed_out=False)
 
         self._start_time = time.time()
+        self._emit(
+            "race_start",
+            url=self.url,
+            active_tiers=list(self.active_tiers),
+            immediate_tiers=list(self.immediate_tiers),
+            deferred_tiers=list(self.deferred_tiers),
+            timeout=self.timeout,
+            confidence_threshold=self.confidence_threshold,
+        )
 
         winner_engine: Optional[str] = None
         winning_candidate: Optional[Candidate] = None
@@ -495,6 +538,15 @@ class ExtractionRaceController:
             except Exception:
                 pass
 
+        self._emit(
+            "race_complete",
+            winner_engine=winner_engine,
+            duration_ms=duration_ms,
+            timed_out=timed_out,
+            spawned_pids=dict(self.spawned_pids),
+            killed_pids=list(self.killed_pids),
+            candidate=candidate_to_dict(winning_candidate) if winning_candidate else None,
+        )
         return RaceResult(
             winner_engine=winner_engine,
             candidate=winning_candidate,

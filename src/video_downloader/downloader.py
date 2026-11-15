@@ -1,4 +1,4 @@
-import os
+import os, re
 import shutil
 import subprocess
 
@@ -134,18 +134,23 @@ def safe_filename(name):
     if not name:
         return "video"
 
-    invalid = '<>:"/\\|?*'
+    invalid = '<>:"/\\|?*\r\n\t'
 
     for char in invalid:
         name = name.replace(char, "_")
 
-    return name.strip() or "video"
+    return name.strip()[:180] or "video"
 
 
-def download(candidate, filename="video", requested_quality=None, conflict_policy=None):
+def download(candidate, filename="video", requested_quality=None, conflict_policy=None, progress_callback=None):
 
     ensure_environment()
     download_dir = Path(get_download_dir())
+    if progress_callback:
+        try:
+            progress_callback(15, f"Preparing stream download ({candidate.source})...")
+        except Exception:
+            pass
 
     extension = ".mp4"
     if candidate.extension:
@@ -171,6 +176,13 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
         print("\n[!] Download skipped.")
         return None
 
+    if str(candidate.source).startswith("twitter"):
+        try:
+            from .extractors.twitter import ensure_media_url
+        except (ImportError, ValueError):
+            from video_downloader.extractors.twitter import ensure_media_url
+        ensure_media_url(candidate.url)
+
     # If the candidate was extracted by yt-dlp, use yt-dlp download engine with ffmpeg muxing
     if candidate.source == "ytdlp" or candidate.metadata.get("engine") == "ytdlp":
         orig_url = candidate.metadata.get("original_url") or candidate.url
@@ -191,6 +203,11 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
         else:
             success = ytdlp_download(orig_url, requested_quality)
         if success:
+            if progress_callback:
+                try:
+                    progress_callback(100, f"Download complete: {resolved_path.name}")
+                except Exception:
+                    pass
             if resolved_path.is_file():
                 return str(resolved_path)
             video_files = [p for p in download_dir.glob("*.mp4") if p.is_file()]
@@ -203,13 +220,18 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
 
     output = str(resolved_path)
 
-    # Check for direct video stream acceleration via parallel byte-ranges
+    # Check for direct video stream acceleration via parallel byte-ranges or atomic HTTP streaming
     url_lower = candidate.url.lower().split("?")[0]
     is_direct_video = any(url_lower.endswith(ext) for ext in (".mp4", ".webm", ".mkv", ".mov", ".avi", ".ts"))
 
     if is_direct_video:
         try:
-            if download_parallel_stream(candidate.url, resolved_path):
+            if download_parallel_stream(candidate.url, resolved_path) or download_http_stream(candidate.url, resolved_path):
+                if progress_callback:
+                    try:
+                        progress_callback(100, f"Download complete: {resolved_path.name}")
+                    except Exception:
+                        pass
                 return output
         except Exception:
             pass
@@ -256,6 +278,12 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
                             mult = 1024 if unit == "kB" else (1024 * 1024 if unit == "MB" else 1)
                             dl_bytes = int(num * mult)
                             progress.update(dl_bytes)
+                            if progress_callback:
+                                try:
+                                    mb = dl_bytes / (1024 * 1024)
+                                    progress_callback(min(95, 35 + int(mb * 2)), f"FFmpeg stream copy: {mb:.1f} MB written")
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
 
@@ -266,9 +294,59 @@ def download(candidate, filename="video", requested_quality=None, conflict_polic
 
         final_size = resolved_path.stat().st_size if resolved_path.is_file() else None
         progress.complete(final_size)
+        if progress_callback:
+            try:
+                progress_callback(100, f"Download complete: {resolved_path.name}")
+            except Exception:
+                pass
         return output
     finally:
         progress.stop()
+
+
+def download_http_stream(url: str, dest_path: Path, timeout: int = 30) -> bool:
+    """
+    Atomic single-stream HTTP downloader (ported from twitter-dl download flow).
+    Streams 64 KB chunks into a .part file and atomically replaces destination on completion.
+    Ideal for direct MP4 clips under the 2 MB parallel range threshold.
+    """
+    import requests
+    from .progress import DownloadProgress
+
+    dest_path = Path(dest_path)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path = dest_path.with_suffix(dest_path.suffix + ".part")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+
+    progress = DownloadProgress()
+    done = 0
+    try:
+        with requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=(15, timeout)) as resp:
+            resp.raise_for_status()
+            total_hdr = resp.headers.get("Content-Length")
+            total = int(total_hdr) if total_hdr and total_hdr.isdigit() else None
+            print(f"\n  \033[96m▶\033[0m {dest_path.stem}")
+            with open(part_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    done += len(chunk)
+                    progress.render(done, total)
+        if done > 0 and part_path.exists():
+            os.replace(part_path, dest_path)
+            progress.complete(done)
+            return True
+    except Exception:
+        pass
+    finally:
+        try:
+            part_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return False
 
 
 def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeout: int = 20) -> bool:
@@ -364,5 +442,3 @@ def download_parallel_stream(url: str, dest_path: Path, threads: int = 4, timeou
         return False
 
     return False
-
-
