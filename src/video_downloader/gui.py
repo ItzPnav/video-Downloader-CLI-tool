@@ -714,9 +714,13 @@ def build_mission_control_dashboard() -> None:
                                 if out_file and Path(out_file).exists():
                                     with race_action_row:
                                         ui.button(
+                                            "Save to Device",
+                                            on_click=lambda p=out_file: ui.download(Path(p)),
+                                        ).classes("btn-tactical-primary")
+                                        ui.button(
                                             "Play Video",
                                             on_click=lambda p=out_file: system_open(Path(p)),
-                                        ).classes("btn-tactical-primary")
+                                        ).classes("btn-tactical-secondary")
                                         ui.button(
                                             "Open Folder",
                                             on_click=lambda p=out_file: system_open(Path(p).parent),
@@ -1470,10 +1474,15 @@ def build_mission_control_dashboard() -> None:
                                             "font-size: 11px; font-weight: 700; color: var(--green);"
                                         )
                                         if out_str and Path(out_str).exists():
-                                            ui.button(
-                                                "Play",
-                                                on_click=lambda _e, p=out_str: system_open(Path(p)),
-                                            ).classes("btn-tactical-secondary py-0 px-2")
+                                            with ui.row().classes("gap-1"):
+                                                ui.button(
+                                                    "Save",
+                                                    on_click=lambda _e, p=out_str: ui.download(Path(p)),
+                                                ).classes("btn-tactical-primary py-0 px-2")
+                                                ui.button(
+                                                    "Play",
+                                                    on_click=lambda _e, p=out_str: system_open(Path(p)),
+                                                ).classes("btn-tactical-secondary py-0 px-2")
                                     ui.label(rec.get("url", "")).style(
                                         "font-size: 10px; color: var(--muted); word-break: break-all;"
                                     )
